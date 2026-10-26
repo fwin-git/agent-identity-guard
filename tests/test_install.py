@@ -170,7 +170,7 @@ class GuidedSetupTests(unittest.TestCase):
         if os.name != "nt":
             self.assertEqual(oct(self.config_file.stat().st_mode & 0o777), "0o600")
         settings = json.loads((self.home / ".claude" / "settings.json").read_text())
-        self.assertIn("identity_guard.py", settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"])
+        self.assertIn("identity_guard.py", json.dumps(settings["hooks"]["PreToolUse"][0]["hooks"][0]))  # command or, on Windows, args
         self.assertLess(out.index("Summary"), out.index("Installed"))
         self.assertLess(out.index("Installed"), out.index("Claude Code  protected"))  # then the status
         self.assertLess(out.index("Claude Code  protected"), out.index("Look back"))  # then the audit offer
