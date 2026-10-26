@@ -228,9 +228,20 @@ class CliTests(GuardTestCase):
     def test_check(self) -> None:
         blocked = self.cli("check", 'curl -A "Jane Testperson" https://example.org')
         self.assertEqual(blocked.returncode, 1)
-        self.assertTrue(blocked.stdout.startswith("BLOCK  Bash: carries your name"))
+        self.assertIn("BLOCK  Bash: carries your name", blocked.stdout)
         allowed = self.cli("check", "--tool", "WebSearch", "weather forecast")
-        self.assertEqual((allowed.returncode, allowed.stdout.strip()), (0, "ALLOW  WebSearch"))
+        self.assertEqual(allowed.returncode, 0)
+        self.assertTrue(allowed.stdout.strip().endswith("ALLOW  WebSearch"))
+
+    def test_plain_ascii_terminal_gets_ascii_symbols(self) -> None:
+        env = {**self.env, "PYTHONIOENCODING": "ascii"}
+        blocked = subprocess.run([sys.executable, str(GUARD), "check", 'curl -A "Jane Testperson" https://example.org'],
+                                 capture_output=True, text=True, env=env, timeout=60)
+        self.assertEqual(blocked.returncode, 1, blocked.stderr)
+        self.assertTrue(blocked.stdout.startswith("x BLOCK  Bash"), blocked.stdout)
+        doctor = subprocess.run([sys.executable, str(GUARD), "doctor"], capture_output=True, text=True, env=env, timeout=60)
+        self.assertEqual(doctor.returncode, 0, doctor.stderr)
+        self.assertIn("+ Your details", doctor.stdout)
 
     def test_doctor_masks_values(self) -> None:
         done = self.cli("doctor")
@@ -249,7 +260,7 @@ class CliTests(GuardTestCase):
         (projects / "s.jsonl").write_text(json.dumps(leak) + "\n")
         done = self.cli("audit", "--claude-only", "--claude-dir", str(projects.parent), "--details")
         self.assertEqual(done.returncode, 2, done.stdout + done.stderr)
-        self.assertIn("1 call(s) would be blocked", done.stdout)
+        self.assertIn("1 call sent your details out", done.stdout)
         self.assertIn("api.example.org", done.stdout)
         self.assertNotIn(EMAIL, done.stdout)
 

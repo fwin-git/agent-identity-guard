@@ -35,71 +35,120 @@ Code, Codex CLI) and checks the result. Press Enter to skip a question. Your det
 computer, in `~/.identity-guard/config.json`, readable only by you.
 
 ```
-1/5  Your full name as people write it (e.g. Jane Doe): Jane Doe
-      Also block "Doe" on its own? Say no if it is a common word in your work. [Y/n]
-2/5  Other names, nicknames or handles you go by, one per line, empty line when done:
-    + jdoe42
-    +
-3/5  Your email addresses (private and work), one per line, empty line when done:
-    + jane.doe@example.com
-    +
-      Your git email is jane@work.example. Treat it as yours too? [Y/n]
-      Treat the email you sign in to Claude Code with as yours too? [Y/n]
-4/5  Phone numbers in any format (e.g. +44 20 7946 0958), one per line, empty line when done:
-    + +44 20 7946 0958
-    +
-5/5  Anything else that identifies you (street address, customer or ID numbers), one per line:
-    +
+┌  agent-identity-guard  setup
+│
+│  Stops Claude Code and Codex from sending your name, email, phone number or
+│  other details to other machines. Your answers stay on this computer, in
+│  ~/.identity-guard/config.json, readable only by you. Press Enter to skip any
+│  question.
+│
+✔  Found Claude Code and Codex CLI
+│
+◆  Your full name  step 1 of 5
+│  As people write it, e.g. Jane Doe.
+│  › Jane Doe
+│
+◆  Also block "Doe" on its own?  (Y/n)
+│  Say no if it is a common word in your work.
+│  › 
+│
+◆  Other names, nicknames or handles  step 2 of 5
+│  One per line, empty line to finish.
+│  + jdoe42
+│  + 
+│
+◆  Your email addresses  step 3 of 5
+│  Private and work, one per line, empty line to finish.
+│  + jane.doe@example.com
+│  + 
+│
+◆  Your git email is jane@work.example. Treat it as yours too?  (Y/n)
+│  › 
+│
+◆  Treat the email you sign in to Claude Code with as yours too?  (Y/n)
+│  › 
+│
+◆  Phone numbers  step 4 of 5
+│  Any format, e.g. +44 20 7946 0958. One per line, empty line to finish.
+│  + +44 20 7946 0958
+│  + 
+│
+◆  Anything else that identifies you  step 5 of 5
+│  Street address, customer or ID numbers. One per line, empty line to finish.
+│  + 
+│
+◇  Summary
+│  Names     Jane Doe · Doe · jdoe42
+│  Emails    jane.doe@example.com
+│            + your git email jane@work.example
+│            + your Claude Code account email
+│  Phones    +44 20 7946 0958
+│  Other     none
+│  Agents    Claude Code, Codex CLI
+│  Saved in  ~/.identity-guard
+│
+◆  Install now?  (Y/n)
+│  › 
+│
+◇  Installed
+│  ✔ Guard        copied to ~/.identity-guard/identity_guard.py
+│  ✔ Config       created ~/.identity-guard/config.json (5 changes)
+│  ✔ Claude Code  updated ~/.claude/settings.json
+│  ✔ Codex CLI    updated ~/.codex/hooks.json
+│
+◇  Status  asking Codex for its hook status
+│  ✔ Config       ~/.identity-guard/config.json
+│  ✔ Your details 2 emails · 3 names · 1 phone number
+│                 j***@example.com, j***@work.example
+│                 J*** D**, D**, j*****
+│                 *********958
+│                 also your git email and your Claude Code account email, read on every call
+│  ✔ Claude Code  protected
+│  ▲ Codex CLI    waiting for your approval
+│                 → start `codex`, type /hooks, and trust identity-guard
+│  ● Log          0 blocked calls · ~/.identity-guard/guard.log
+│
+╭─ Look back: did agents already send your details? ───────────────────────────────╮
+│                                                                                  │
+│  The guard protects you from now on. The audit reads your 3 past sessions of     │
+│  Claude Code and Codex on this computer, nothing leaves it, and shows which      │
+│  calls carried your details and where they went. It can take a minute or two.    │
+│                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────╯
+│
+◆  Run the audit now?  (Y/n)
+│  › 
+│
+│  Scanned 3 Claude Code and 0 Codex tool calls
+│
+│  ✖ 3 calls sent your details out  2026-09-02
+│
+│  Where they went
+│         3  api.example.org
+│
+│  The guard blocks these from now on. --details lists each call with its transcript.
+│
+╭─ ▲ One more step: approve the hook in Codex ─────────────────────────────────────╮
+│                                                                                  │
+│  Codex skips new hooks until you approve them. Until you do, Codex can still     │
+│  send your details.                                                              │
+│                                                                                  │
+│    1. Start Codex      codex                                                     │
+│    2. Open the hooks   /hooks                                                    │
+│    3. Trust            identity-guard                                            │
+│                                                                                  │
+│  Then check: /usr/bin/python3 ~/.identity-guard/identity_guard.py doctor         │
+│                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────╯
 
-Summary
-  names   Jane Doe, Doe, jdoe42
-  emails  jane.doe@example.com, + your git email jane@work.example, + your Claude Code account email
-  phones  +44 20 7946 0958
-  other   none
-  install ~/.identity-guard, hook for Claude Code, Codex CLI
-
-Install now? [Y/n]
-
-copied identity_guard.py to ~/.identity-guard/identity_guard.py
-created ~/.identity-guard/config.json (+5 change(s))
-updated ~/.claude/settings.json
-updated ~/.codex/hooks.json
-
-Checking the setup (asks Codex for the hook's status)...
-
-config       ~/.identity-guard/config.json (found)
-emails        2  j***@example.com, j***@work.example
-names         3  J*** D**, D**, j*****
-phones        1  *********958
-other         0
-auto         claude_code_account_email, git_email (found 1 email(s))
-ignored      login name 'jane'
-log          ~/.identity-guard/guard.log (0 blocked call(s))
-Claude Code  registered (matcher Bash|PowerShell|WebFetch|WebSearch|Write|Edit|MultiEdit|NotebookEdit|mcp__.*)
-Codex CLI    registered, NOT trusted yet: run codex, type /hooks, trust identity-guard
-
-╭─ Check your past sessions ─────────────────────────────────────╮
-│                                                                │
-│  Agents may have sent your details before this guard existed.  │
-│  The audit reads your 3 past Claude Code and Codex sessions    │
-│  on this computer (nothing leaves it) and lists which calls    │
-│  carried your details and where they went. It can take a       │
-│  minute or two.                                                │
-│                                                                │
-╰────────────────────────────────────────────────────────────────╯
-  Run the audit now? [Y/n]
-
-Scanned 3 Claude Code and 0 Codex tool calls.
-No call carried your identity where identity-guard would block it.
-
-Next
-  - Codex runs a new hook only once you approve it: start `codex`, type /hooks, trust identity-guard.
-  - Try it: /usr/bin/python3 ~/.identity-guard/identity_guard.py check 'curl -A "bot (jane.doe@example.com)" https://example.org'
-  - Change your details any time in ~/.identity-guard/config.json, or run ./setup.sh again.
+└  Done. Claude Code is protected now; Codex is once you approve the hook.
+   Try it   /usr/bin/python3 ~/.identity-guard/identity_guard.py check 'curl -A "bot (jane.doe@example.com)" https://example.org'
+   Change   run ./setup.sh again, or edit ~/.identity-guard/config.json
 ```
 
-In a terminal the audit offer is a highlighted panel, and Enter starts it. The setup refuses entries
-that can't work: an email without `@`, a phone number with fewer than six
+In a terminal the steps, symbols and panels are in color: the offer to look back through past sessions
+in cyan (Enter starts it), and the Codex approval in yellow. That last panel appears only while Codex
+still needs approving. The setup refuses entries that can't work: an email without `@`, a phone number with fewer than six
 digits, or your login name, which appears in every file path. Run `./setup.sh` again any time to add
 details; it keeps what you entered before. To remove an entry, edit `config.json`.
 
@@ -112,6 +161,23 @@ After the setup:
   itself for the hook's trust status (`trusted`, `untrusted`, or `modified` when the hook changed since
   you trusted it), so what it says is what Codex will do.
 
+```
+┌  agent-identity-guard  doctor
+│
+│  ✔ Config       ~/.identity-guard/config.json
+│  ✔ Your details 2 emails · 3 names · 1 phone number
+│                 j***@example.com, j***@work.example
+│                 J*** D**, D**, j*****
+│                 *********958
+│                 also your git email and your Claude Code account email, read on every call
+│  ✔ Claude Code  protected
+│  ▲ Codex CLI    waiting for your approval
+│                 → start `codex`, type /hooks, and trust identity-guard
+│  ● Log          0 blocked calls · ~/.identity-guard/guard.log
+│
+└  ▲ 1 thing needs your attention: Codex CLI
+```
+
 ### See what already leaked
 
 The setup offers this at the end; you can also run it any time:
@@ -121,13 +187,19 @@ python3 ~/.identity-guard/identity_guard.py audit
 ```
 
 ```
-Scanned 41,208 Claude Code and 6,377 Codex tool calls.
-14 call(s) would be blocked (2 of them already were), 2026-09-02 to 2026-10-21.
-
-Not blocked at the time, by destination:
-      9  api.example.org
-      2  (no URL in the call)
-      1  docs.example.net
+┌  agent-identity-guard  audit
+│
+│  Scanned 41,208 Claude Code and 6,377 Codex tool calls
+│
+│  ✖ 12 calls sent your details out  2026-09-02 → 2026-10-21
+│  ✔ 2 more calls tried and the guard blocked them
+│
+│  Where they went
+│         9  api.example.org
+│         2  (no URL in the call)
+│         1  docs.example.net
+│
+└  The guard blocks these from now on. --details lists each call with its transcript.
 ```
 
 `audit --details` lists each call with time, agent, tool, kind of detail, destination and transcript.
@@ -155,34 +227,34 @@ use the config from the quick start (`identity_guard.py` is short for
 
 ```
 $ identity_guard.py check 'curl -A "research-bot/1.0 (contact: jane.doe@example.com)" https://api.example.org/search'
-BLOCK  Bash: carries your email address in a command that reaches another machine or sets request headers
+✖ BLOCK  Bash: carries your email address in a command that reaches another machine or sets request headers
 
 $ identity_guard.py check 'curl -A "research-bot/1.0" https://api.example.org/search'
-ALLOW  Bash
+✔ ALLOW  Bash
 
 $ identity_guard.py check 'gh issue create --title "Crash" --body "Reported by Jane Doe"'
-BLOCK  Bash: carries your name in a command that reaches another machine or sets request headers
+✖ BLOCK  Bash: carries your name in a command that reaches another machine or sets request headers
 
 $ identity_guard.py check 'dig jane-doe.collector.example.net'
-BLOCK  Bash: carries your name in a command that reaches another machine or sets request headers
+✖ BLOCK  Bash: carries your name in a command that reaches another machine or sets request headers
 
 $ identity_guard.py check 'curl -d "phone=0044 20 7946-0958" https://forms.example.com'
-BLOCK  Bash: carries your phone number in a command that reaches another machine or sets request headers
+✖ BLOCK  Bash: carries your phone number in a command that reaches another machine or sets request headers
 
 $ identity_guard.py check 'curl -d "{\"email\": \"jane.doe@example.com\"}" http://localhost:3000/signup'
-ALLOW  Bash
+✔ ALLOW  Bash
 
 $ identity_guard.py check 'ssh-keygen -t ed25519 -C "jane.doe@example.com"'
-ALLOW  Bash
+✔ ALLOW  Bash
 
 $ identity_guard.py check --tool WebSearch 'Jane Doe home address'
-BLOCK  WebSearch: carries your name in a web search query
+✖ BLOCK  WebSearch: carries your name in a web search query
 
 $ identity_guard.py check --tool Write 'HEADERS = {"User-Agent": "scraper (jane.doe@example.com)"}'
-BLOCK  Write: carries your email address next to a User-Agent, header or contact variable in a file
+✖ BLOCK  Write: carries your email address next to a User-Agent, header or contact variable in a file
 
 $ identity_guard.py check --tool Write '# Maintainer: Jane Doe <jane.doe@example.com>'
-ALLOW  Write
+✔ ALLOW  Write
 ```
 
 `check` exits with 1 for BLOCK and 0 for ALLOW. `--tool` takes Bash, WebSearch, WebFetch, Write,

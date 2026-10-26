@@ -25,8 +25,10 @@ import getpass
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import textwrap
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -439,6 +441,82 @@ def hook(raw: str) -> Optional[dict]:
         return {"systemMessage": f"identity-guard failed and let the call through: {error!r}"}
 
 
+# --- terminal output --------------------------------------------------------------------------------
+
+ANSI = re.compile(r"\033\[[\d;]*m")
+
+
+class Ui:
+    """The look of check, doctor, audit and the guided setup: steps on a rail, status symbols, panels.
+    Colors only on a terminal (never with NO_COLOR or TERM=dumb); ASCII symbols where Unicode can't show."""
+
+    CODES = {"bold": "1", "dim": "2", "red": "31", "green": "32", "yellow": "33", "cyan": "36", "gray": "90"}
+    TONES = {"ok": ("ok", "green"), "warn": ("warn", "yellow"), "fail": ("fail", "red"), "info": ("info", "gray")}
+
+    def __init__(self, stream=None) -> None:
+        stream = stream or sys.stdout
+        self.color = bool(getattr(stream, "isatty", lambda: False)()) and not os.environ.get("NO_COLOR") \
+            and os.environ.get("TERM") != "dumb"
+        unicode = (getattr(stream, "encoding", None) or "").lower().replace("-", "").startswith("utf")
+        names = ("ok", "fail", "warn", "info", "ask", "done", "rail", "start", "end", "prompt", "dot", "arrow")
+        shapes = ("✔", "✖", "▲", "●", "◆", "◇", "│", "┌", "└", "›", "·", "→") if unicode else \
+            ("+", "x", "!", "*", "?", "*", "|", "+", "+", ">", "-", "->")
+        self.sym = dict(zip(names, shapes))
+        self.frame = "╭╮╰╯─│" if unicode else "++++-|"
+        self.width = max(56, min(84, shutil.get_terminal_size((80, 24)).columns - 2))
+
+    def __call__(self, text: str, *styles: str) -> str:
+        if not self.color or not styles:
+            return text
+        return f"\033[{';'.join(self.CODES[s] for s in styles)}m{text}\033[0m"
+
+    def rail(self, text: str = "") -> str:
+        return f"{self(self.sym['rail'], 'gray')}  {text}".rstrip()
+
+    def mark(self, tone: str) -> str:
+        symbol, color = self.TONES[tone]
+        return self(self.sym[symbol], color)
+
+    def row(self, tone: str, label: str, value: str, width: int = 13) -> str:
+        return f"{self.mark(tone)} {self(label.ljust(width), 'bold')}{value}"
+
+    def head(self, symbol: str, title: str, hint: str = "") -> str:
+        color = {"ask": "cyan", "done": "green", "start": "gray", "end": "gray", "warn": "yellow"}.get(symbol, "gray")
+        shown = self(self.sym.get(symbol, symbol), color)
+        return f"{shown}  {self(title, 'bold')}" + (f"  {self(hint, 'dim')}" if hint else "")
+
+    def wrap(self, text: str, indent: int = 0) -> list:
+        return textwrap.wrap(text, self.width - 6 - indent) or [""]
+
+    def box(self, title: str, lines: list, color: str = "yellow") -> str:
+        """A framed panel for the one thing that must not be missed."""
+        h, inner = self.frame, self.width - 2
+        top = self(f"{h[0]}{h[4]} ", color) + self(title, "bold", color) + self(f" {h[4] * (inner - len(title) - 3)}{h[1]}", color)
+        body = []
+        for line in [""] + lines + [""]:
+            pad = inner - 4 - len(ANSI.sub("", line))
+            body.append(f"{self(h[5], color)}  {line}{' ' * max(0, pad)}  {self(h[5], color)}")
+        return "\n".join([top, *body, self(h[2] + h[4] * inner + h[3], color)])
+
+
+def replace_unprintable() -> None:
+    """Print ? for characters the terminal's encoding can't show (a name with an umlaut on an ASCII terminal)."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
+def tilde(path: object) -> str:
+    text, home = str(path), str(Path.home())
+    return "~" + text[len(home):] if text == home or text.startswith(home + os.sep) else text
+
+
+def plural(count: int, word: str) -> str:
+    return f"{count:,} {word}{'' if count == 1 else 's'}"
+
+
 # --- check, doctor, audit ---------------------------------------------------------------------------
 
 
@@ -462,12 +540,13 @@ def tool_input_for(tool: str, text: str) -> dict:
 
 
 def cmd_check(args: argparse.Namespace) -> int:
+    ui = Ui()
     text = sys.stdin.read() if args.text == "-" else args.text
     result = Guard(load_config()).check(args.tool, tool_input_for(args.tool, text))
     if result:
-        print(f"BLOCK  {args.tool}: carries your {result[0]} {result[1]}")
+        print(f"{ui.mark('fail')} {ui('BLOCK', 'bold', 'red')}  {args.tool}: carries your {ui(result[0], 'bold')} {result[1]}")
         return 1
-    print(f"ALLOW  {args.tool}")
+    print(f"{ui.mark('ok')} {ui('ALLOW', 'bold', 'green')}  {args.tool}")
     return 0
 
 
@@ -547,53 +626,116 @@ def codex_trust(timeout: float = 20.0) -> dict:
     return statuses
 
 
-def cmd_doctor(args: argparse.Namespace) -> int:
+CODEX_APPROVAL = ["Start Codex:  codex", "Type:         /hooks", "Trust:        identity-guard"]
+KIND_WORDS = {"emails": "email", "names": "name", "phones": "phone number", "other": "other detail"}
+
+
+@dataclass
+class Check:
+    tone: str  # ok, warn, fail or info
+    label: str
+    value: str
+    details: list = field(default_factory=list)
+    fix: str = ""
+
+
+def codex_check() -> Check:
+    hooks_file = codex_home() / "hooks.json"
+    registered = registered_hooks(hooks_file)
+    if not registered:
+        if codex_home().exists():
+            return Check("warn", "Codex CLI", "installed, but not protected", fix="run ./setup.sh (or install.py) again")
+        return Check("info", "Codex CLI", "not installed")
+    g, h, _ = registered[0]
+    key = f"{hooks_file}:pre_tool_use:{g}:{h}"
+    status = codex_trust().get(key)
+    if status is None:  # codex not on PATH or too old to answer: fall back to its config file
+        try:
+            recorded = f'[hooks.state."{key}"]' in (codex_home() / "config.toml").read_text()
+        except OSError:
+            recorded = False
+        if recorded:
+            return Check("ok", "Codex CLI", "protected", ["approval recorded; Codex couldn't be asked to confirm"])
+        status = "untrusted"
+    if status in ("trusted", "managed"):
+        return Check("ok", "Codex CLI", "protected" + (" (trusted by policy)" if status == "managed" else ""))
+    value = "changed since you approved it, so Codex skips it" if status == "modified" else "waiting for your approval"
+    return Check("warn", "Codex CLI", value, fix="start `codex`, type /hooks, and trust identity-guard")
+
+
+def doctor_checks(ui: Optional[Ui] = None) -> list:
+    """What `doctor` reports, as data, so the guided setup can show the same status."""
+    dot = f" {(ui or Ui()).sym['dot']} "
     path = config_path()
-    print(f"config       {path} ({'found' if path.exists() else 'missing: copy config.example.json'})")
     try:
         config = load_config(path)
         guard = Guard(config)
     except Exception as error:
-        print(f"             ERROR {error}")
-        return 1
-    for kind in KINDS:
-        values = guard.markers[kind]
-        print(f"{kind:<12} {len(values):>2}  {', '.join(mask(kind, v) for v in values)}".rstrip())
-    auto = [name for name, on in config.auto.items() if on]
-    print(f"auto         {', '.join(auto) or 'off'} (found {len(auto_emails(config))} email(s))")
-    print(f"ignored      login name {login_name()!r}{', plus ' + str(len(config.ignore)) + ' listed' if config.ignore else ''}")
+        return [Check("fail", "Config", "can't be read", [str(error)], fix=f"fix the JSON in {tilde(path)}, or run ./setup.sh")]
+    checks = [Check("ok", "Config", tilde(path)) if path.exists() else
+              Check("warn", "Config", f"{tilde(path)} is missing", fix="run ./setup.sh, or copy config.example.json there")]
+
+    counts = [plural(len(guard.markers[k]), KIND_WORDS[k]) for k in KINDS if guard.markers[k]]
+    details = [", ".join(mask(k, v) for v in guard.markers[k]) for k in KINDS if guard.markers[k]]
+    auto = [label for key, label in (("git_email", "your git email"), ("claude_code_account_email", "your Claude Code account email"))
+            if config.auto.get(key)]
+    if auto:
+        details.append("also " + " and ".join(auto) + ", read on every call")
+    if guard.pattern is None:
+        checks.append(Check("fail", "Your details", "none listed", details,
+                            fix="run ./setup.sh to add your names and emails; until then only identity read at run time is caught"))
+    else:
+        checks.append(Check("ok", "Your details", dot.join(counts), details))
+
+    if registered_hooks(claude_home() / "settings.json"):
+        checks.append(Check("ok", "Claude Code", "protected"))
+    elif claude_home().exists():
+        checks.append(Check("warn", "Claude Code", "installed, but not protected", fix="run ./setup.sh (or install.py) again"))
+    else:
+        checks.append(Check("info", "Claude Code", "not installed"))
+    checks.append(codex_check())
+
     if config.log_file:
         entries = len(config.log_file.read_text().splitlines()) if config.log_file.exists() else 0
-        print(f"log          {config.log_file} ({entries} blocked call(s))")
+        checks.append(Check("info", "Log", f"{plural(entries, 'blocked call')}{dot}{tilde(config.log_file)}"))
     else:
-        print("log          off")
-    claude = registered_hooks(claude_home() / "settings.json")
-    print(f"Claude Code  {'registered (matcher ' + claude[0][2] + ')' if claude else 'not registered: run install.py'}")
-    codex_hooks = codex_home() / "hooks.json"
-    codex = registered_hooks(codex_hooks)
-    if codex:
-        g, h, _ = codex[0]
-        key = f"{codex_hooks}:pre_tool_use:{g}:{h}"
-        status = codex_trust().get(key)
-        if status is None:  # codex not on PATH or too old to answer: fall back to the config file
-            try:
-                recorded = f'[hooks.state."{key}"]' in (codex_home() / "config.toml").read_text()
-            except OSError:
-                recorded = False
-            status = "trust recorded, not confirmed (if Codex shows a hooks warning, re-trust)" if recorded else "untrusted"
-        advice = {
-            "trusted": "trusted",
-            "managed": "trusted by policy",
-            "untrusted": "NOT trusted yet: run codex, type /hooks, trust identity-guard",
-            "modified": "changed since you trusted it, so Codex skips it: run codex, type /hooks, trust it again",
-        }
-        print(f"Codex CLI    registered, {advice.get(status, status)}")
-    else:
-        print("Codex CLI    not registered" + (": run install.py" if codex_home().exists() else " (no ~/.codex)"))
-    if guard.pattern is None:
-        print("\nNo markers: the guard only catches identity read at run time. Add your names and emails to the config.")
-        return 1
-    return 0
+        checks.append(Check("info", "Log", "off"))
+    return checks
+
+
+def render_checks(ui: Ui, checks: list) -> list:
+    """Status rows with their details (dim) and, under anything that needs you, the fix."""
+    lines = []
+    for check in checks:
+        lines.append(ui.row(check.tone, check.label, check.value))
+        for detail in check.details:
+            lines.append(" " * 15 + ui(detail, "dim"))
+        if check.fix:
+            lines.append(" " * 15 + ui(f"{ui.sym['arrow']} {check.fix}", "yellow" if check.tone == "warn" else "red"))
+    return lines
+
+
+def verdict(ui: Ui, checks: list) -> str:
+    problems = [c for c in checks if c.tone in ("warn", "fail")]
+    if not problems:
+        return f"{ui.mark('ok')} {ui('All set.', 'bold', 'green')} The guard checks every tool call for your details."
+    tone = "fail" if any(c.tone == "fail" for c in problems) else "warn"
+    color = "red" if tone == "fail" else "yellow"
+    things = plural(len(problems), "thing")
+    return f"{ui.mark(tone)} {ui(things + (' needs' if len(problems) == 1 else ' need') + ' your attention:', 'bold', color)} " \
+           + ", ".join(c.label for c in problems)
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    ui = Ui()
+    print(ui.head("start", "agent-identity-guard", "doctor"))
+    print(ui.rail())
+    checks = doctor_checks(ui)
+    for line in render_checks(ui, checks):
+        print(ui.rail(line))
+    print(ui.rail())
+    print(f"{ui(ui.sym['end'], 'gray')}  {verdict(ui, checks)}")
+    return 1 if any(c.tone == "fail" for c in checks) else 0
 
 
 # How a tool result looks when identity-guard (or its earlier "Identity guard" wording) refused the call.
@@ -686,9 +828,15 @@ def hosts_of(guard: Guard, tool_input: dict) -> list:
 
 
 def cmd_audit(args: argparse.Namespace) -> int:
+    ui = Ui()
+    embedded = getattr(args, "embedded", False)  # inside the guided setup's rail: no frame of its own
+    end = ui(ui.sym["rail" if embedded else "end"], "gray")
+    if not embedded:
+        print(ui.head("start", "agent-identity-guard", "audit"))
+        print(ui.rail())
     guard = Guard(load_config())
     if guard.pattern is None:
-        print("No markers configured, nothing to look for. Add your names and emails to the config first.")
+        print(f"{end}  {ui.mark('fail')} No details in your config, so there is nothing to look for. Run ./setup.sh first.")
         return 1
     sources = []
     if not args.codex_only:
@@ -701,33 +849,44 @@ def cmd_audit(args: argparse.Namespace) -> int:
     for agent, calls in sources:
         for stamp, tool, tool_input, was_blocked, path in calls:
             scanned[agent] += 1
+            if ui.color and sum(scanned.values()) % 2000 == 0:  # progress on a terminal; long histories take a while
+                progress = f"Reading past sessions {ui.sym['dot']} {sum(scanned.values()):,} tool calls"
+                print("\r" + ui.rail(ui(progress, "dim")), end="", flush=True)
             try:
                 result = guard.check(tool, tool_input)
             except Exception:
                 continue
             if result:
                 findings.append((stamp[:16].replace("T", " "), agent, tool, result[0], hosts_of(guard, tool_input), was_blocked, path))
-    print(f"Scanned {scanned['claude']:,} Claude Code and {scanned['codex']:,} Codex tool calls.")
+    if ui.color:
+        print("\r\033[2K", end="")
+    print(ui.rail(f"Scanned {scanned['claude']:,} Claude Code and {scanned['codex']:,} Codex tool calls"))
+    print(ui.rail())
     leaked = [f for f in findings if not f[5]]
-    if not findings:
-        print("No call carried your identity where identity-guard would block it.")
+    stopped = len(findings) - len(leaked)
+    if not leaked:
+        note = f"; the guard blocked {plural(stopped, 'call')} that tried" if stopped else ""
+        print(f"{end}  {ui.mark('ok')} {ui('Nothing went out.', 'bold', 'green')} No past call sent your details{note}.")
         return 0
-    dates = sorted(f[0][:10] for f in findings if f[0])
-    print(f"{len(findings)} call(s) would be blocked ({len(findings) - len(leaked)} of them already were), "
-          f"{dates[0] if dates else '?'} to {dates[-1] if dates else '?'}.")
-    by_host = Counter(host for f in leaked for host in f[4])
-    if by_host:
-        print("\nNot blocked at the time, by destination:")
-        for host, count in by_host.most_common():
-            print(f"  {count:>5}  {host}")
+    dates = sorted(f[0][:10] for f in leaked if f[0])
+    span = (dates[0] if dates[0] == dates[-1] else f"{dates[0]} {ui.sym['arrow']} {dates[-1]}") if dates else "dates unknown"
+    print(ui.rail(f"{ui.mark('fail')} {ui(plural(len(leaked), 'call') + ' sent your details out', 'bold', 'red')}  {ui(span, 'dim')}"))
+    if stopped:
+        print(ui.rail(f"{ui.mark('ok')} {plural(stopped, 'more call')} tried and the guard blocked {'it' if stopped == 1 else 'them'}"))
+    print(ui.rail())
+    print(ui.rail(ui("Where they went", "bold")))
+    for host, count in Counter(host for f in leaked for host in f[4]).most_common():
+        print(ui.rail(f"  {count:>6,}  {host}"))
+    print(ui.rail())
     if args.details:
-        print("\nwhen              agent   tool          what                         destination  transcript")
+        print(ui.rail(ui(f"{'when':<17} {'agent':<7} {'tool':<13} {'what':<28} destination, transcript", "bold")))
         for when, agent, tool, what, hosts, was_blocked, path in findings:
-            note = " (blocked)" if was_blocked else ""
-            print(f"{when:<17} {agent:<7} {tool[:13]:<13} {what[:28]:<28} {', '.join(hosts)}{note}  {path}")
+            note = ui(" (blocked)", "green") if was_blocked else ""
+            print(ui.rail(f"{when:<17} {agent:<7} {tool[:13]:<13} {what[:28]:<28} {', '.join(hosts)}{note}  {ui(tilde(path), 'dim')}"))
+        print(f"{end}  The guard blocks these from now on.")
     else:
-        print("\nRun with --details for each call (time, agent, tool, what, destination, transcript).")
-    return 2 if leaked else 0
+        print(f"{end}  The guard blocks these from now on. {ui('--details lists each call with its transcript.', 'dim')}")
+    return 2
 
 
 def main(argv: Optional[list] = None) -> int:
@@ -737,6 +896,7 @@ def main(argv: Optional[list] = None) -> int:
         if output:
             json.dump(output, sys.stdout)
         return 0
+    replace_unprintable()
     parser = argparse.ArgumentParser(prog="identity_guard.py", description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check", help="try a command or tool input against your config")
@@ -751,6 +911,7 @@ def main(argv: Optional[list] = None) -> int:
     audit.add_argument("--codex-only", action="store_true")
     audit.add_argument("--claude-dir", help="Claude Code transcripts (default ~/.claude/projects)")
     audit.add_argument("--codex-dir", help="Codex home (default ~/.codex)")
+    audit.add_argument("--embedded", action="store_true", help=argparse.SUPPRESS)
     audit.set_defaults(run=cmd_audit)
     args = parser.parse_args(argv)
     return args.run(args)

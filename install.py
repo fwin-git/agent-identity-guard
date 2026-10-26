@@ -23,7 +23,9 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
+
+import identity_guard as ig
 
 HERE = Path(__file__).resolve().parent
 CLAUDE_MATCHER = "Bash|PowerShell|WebFetch|WebSearch|Write|Edit|MultiEdit|NotebookEdit|mcp__.*"
@@ -32,16 +34,8 @@ MARKER_FLAGS = {"name": "names", "email": "emails", "phone": "phones", "other": 
 AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex CLI"}
 
 
-def claude_home() -> Path:
-    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").expanduser()
-
-
-def codex_home() -> Path:
-    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser()
-
-
 def found_agents() -> list:
-    return [agent for agent, home in (("claude", claude_home()), ("codex", codex_home())) if home.exists()]
+    return [agent for agent, home in (("claude", ig.claude_home()), ("codex", ig.codex_home())) if home.exists()]
 
 
 def pick_python(requested: Optional[str]) -> str:
@@ -77,12 +71,12 @@ def without_ours(groups: list) -> list:
     return kept
 
 
-def update_hooks_file(path: Path, entry_group: Optional[dict], dry_run: bool) -> str:
-    """Put entry_group into the file's hooks.PreToolUse (None removes ours). Returns what happened."""
+def update_hooks_file(path: Path, entry_group: Optional[dict], dry_run: bool) -> Tuple[str, str]:
+    """Put entry_group into the file's hooks.PreToolUse (None removes ours). Returns (tone, what happened)."""
     try:
         data = json.loads(path.read_text()) if path.exists() else {}
     except ValueError as error:
-        return f"skipped {path}: not valid JSON ({error}); fix it and run again"
+        return "fail", f"skipped {ig.tilde(path)}: not valid JSON ({error}); fix it and run again"
     hooks = data.setdefault("hooks", {})
     groups = without_ours(hooks.get("PreToolUse") or [])
     if entry_group:
@@ -96,14 +90,14 @@ def update_hooks_file(path: Path, entry_group: Optional[dict], dry_run: bool) ->
     new_text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
     old_text = path.read_text() if path.exists() else ""
     if new_text == old_text:
-        return f"unchanged {path}"
+        return "ok", f"unchanged {ig.tilde(path)}"
     if dry_run:
-        return f"would update {path}"
+        return "info", f"would update {ig.tilde(path)}"
     if path.exists():
         shutil.copy2(path, path.with_name(path.name + ".bak"))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new_text)
-    return f"updated {path}" + (f" (backup {path.name}.bak)" if old_text else "")
+    return "ok", f"updated {ig.tilde(path)}" + (f" (backup {path.name}.bak)" if old_text else "")
 
 
 def read_config(prefix: Path) -> Optional[dict]:
@@ -111,7 +105,7 @@ def read_config(prefix: Path) -> Optional[dict]:
     return json.loads(path.read_text()) if path.exists() else None
 
 
-def write_config(prefix: Path, additions: dict, dry_run: bool, auto: Optional[dict] = None) -> str:
+def write_config(prefix: Path, additions: dict, dry_run: bool, auto: Optional[dict] = None) -> Tuple[str, str]:
     """Create config.json (from the example's comments, without its sample values) or add to it."""
     path = prefix / "config.json"
     config = read_config(prefix)
@@ -133,98 +127,98 @@ def write_config(prefix: Path, additions: dict, dry_run: bool, auto: Optional[di
             auto_markers[key] = value
             changed += 1
     if not created and not changed:
-        return f"kept {path}"
-    note = f" (+{changed} change(s))" if changed else ""
+        return "ok", f"kept {ig.tilde(path)} (no changes)"
+    note = f" ({ig.plural(changed, 'change')})" if changed else ""
     if dry_run:
-        return f"would {'create' if created else 'update'} {path}{note}"
+        return "info", f"would {'create' if created else 'update'} {ig.tilde(path)}{note}"
     prefix.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n")
     os.chmod(path, 0o600)  # it lists personal details
-    return f"{'created' if created else 'updated'} {path}{note}"
+    return "ok", f"{'created' if created else 'updated'} {ig.tilde(path)}{note}"
 
 
 def install(prefix: Path, agents: list, python: str, additions: dict, dry_run: bool, auto: Optional[dict] = None) -> list:
-    """Copy the guard, write the config, register the hooks. Returns one line per step."""
+    """Copy the guard, write the config, register the hooks. Returns (tone, label, what happened) per part."""
     script = prefix / "identity_guard.py"
     command = f"{shlex.quote(python)} {shlex.quote(str(script))}"
-    report = []
     if dry_run:
-        report.append(f"would copy identity_guard.py to {script}")
+        steps = [("info", "Guard", f"would copy to {ig.tilde(script)}")]
     else:
         prefix.mkdir(parents=True, exist_ok=True)
         shutil.copy2(HERE / "identity_guard.py", script)
         os.chmod(script, 0o755)
-        report.append(f"copied identity_guard.py to {script}")
-    report.append(write_config(prefix, additions, dry_run, auto))
+        steps = [("ok", "Guard", f"copied to {ig.tilde(script)}")]
+    tone, text = write_config(prefix, additions, dry_run, auto)
+    steps.append((tone, "Config", text))
     if "claude" in agents:
         group = {"matcher": CLAUDE_MATCHER, "hooks": [{"type": "command", "command": command, "timeout": 10}]}
-        report.append(update_hooks_file(claude_home() / "settings.json", group, dry_run))
+        tone, text = update_hooks_file(ig.claude_home() / "settings.json", group, dry_run)
+        steps.append((tone, "Claude Code", text))
     if "codex" in agents:
         group = {"matcher": CODEX_MATCHER, "hooks": [
             {"type": "command", "command": command, "timeout": 10, "statusMessage": "identity-guard"}]}
-        report.append(update_hooks_file(codex_home() / "hooks.json", group, dry_run))
-    return report
+        tone, text = update_hooks_file(ig.codex_home() / "hooks.json", group, dry_run)
+        steps.append((tone, "Codex CLI", text))
+    return steps
 
 
 # --- guided setup -----------------------------------------------------------------------------------
 
 
-def ask(prompt: str) -> str:
-    try:
-        return input(prompt).strip()
-    except EOFError:
-        print()
-        raise SystemExit("No answer, so nothing was changed.")
+class Stopped(Exception):
+    """The answers ran out (EOF) before the setup finished."""
 
 
-def ask_yes(prompt: str, default: bool = True) -> bool:
-    while True:
-        answer = ask(f"{prompt} {'[Y/n]' if default else '[y/N]'} ").lower()
-        if not answer:
-            return default
-        if answer in ("y", "yes", "j", "ja"):
-            return True
-        if answer in ("n", "no", "nein"):
-            return False
+class Prompter:
+    """Questions on the rail: a heading per question, a dim hint, and the answer after a prompt mark."""
 
+    def __init__(self, ui: ig.Ui) -> None:
+        self.ui = ui
 
-def ask_many(prompt: str, valid: Callable[[str], Optional[str]]) -> list:
-    """Entries one per line until an empty line. valid() returns an error message, or None when fine."""
-    print(prompt)
-    values: list = []
-    while True:
-        value = ask("    + ")
-        if not value:
-            return values
-        problem = valid(value)
-        if problem:
-            print(f"      {problem}; not added.")
-        elif value not in values:
-            values.append(value)
+    def say(self, text: str = "") -> None:
+        print(self.ui.rail(text))
 
+    def heading(self, title: str, hint: str = "", step: str = "") -> None:
+        print(self.ui.head("ask", title, step))
+        for line in self.ui.wrap(hint) if hint else []:
+            self.say(self.ui(line, "dim"))
 
-def paint(text: str, *codes: str) -> str:
-    """ANSI styling (1 bold, 33 yellow, 36 cyan) on a terminal; plain text in pipes or with NO_COLOR."""
-    if not codes or not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
-        return text
-    return f"\033[{';'.join(codes)}m{text}\033[0m"
+    def read(self, mark: str) -> str:
+        try:
+            return input(self.ui.rail(self.ui(mark, "cyan")) + " ").strip()
+        except EOFError:
+            print()
+            raise Stopped()
 
+    def text(self, title: str, hint: str = "", step: str = "") -> str:
+        self.heading(title, hint, step)
+        answer = self.read(self.ui.sym["prompt"])
+        self.say()
+        return answer
 
-def boxed(title: str, text: str, width: int = 64) -> str:
-    """A framed panel that stands out from the command output around it."""
-    import textwrap
+    def yes(self, title: str, hint: str = "", default: bool = True) -> bool:
+        self.heading(f"{title}  {self.ui('(Y/n)' if default else '(y/N)', 'dim')}", hint)
+        while True:
+            answer = self.read(self.ui.sym["prompt"]).lower()
+            if answer in ("", "y", "yes", "j", "ja", "n", "no", "nein"):
+                self.say()
+                return default if not answer else answer in ("y", "yes", "j", "ja")
+            self.say(self.ui("Please answer y or n.", "yellow"))
 
-    lines = [""] + textwrap.wrap(text, width - 4) + [""]
-    top = f"╭─ {title} " + "─" * (width - len(title) - 3) + "╮"
-    body = [f"│  {line:<{width - 4}}  │" for line in lines]
-    bottom = "╰" + "─" * width + "╯"
-    return "\n".join(paint(row, "1", "33") for row in [top, *body, bottom])
-
-
-def past_sessions() -> int:
-    """How many Claude Code and Codex transcripts this computer has (what audit would read)."""
-    roots = [claude_home() / "projects", codex_home() / "sessions", codex_home() / "archived_sessions"]
-    return sum(1 for root in roots if root.exists() for _ in root.rglob("*.jsonl"))
+    def many(self, title: str, hint: str, step: str, valid: Callable[[str], Optional[str]]) -> list:
+        """Entries one per line until an empty line. valid() returns a reason to refuse, or None."""
+        self.heading(title, hint, step)
+        values: list = []
+        while True:
+            value = self.read("+")
+            if not value:
+                self.say()
+                return values
+            problem = valid(value)
+            if problem:
+                self.say(f"{self.ui.mark('fail')} {self.ui(problem + '; not added', 'red')}")
+            elif value not in values:
+                values.append(value)
 
 
 def git_email() -> str:
@@ -234,7 +228,15 @@ def git_email() -> str:
         return ""
 
 
+def past_sessions() -> int:
+    """How many Claude Code and Codex transcripts this computer has (what audit would read)."""
+    roots = [ig.claude_home() / "projects", ig.codex_home() / "sessions", ig.codex_home() / "archived_sessions"]
+    return sum(1 for root in roots if root.exists() for _ in root.rglob("*.jsonl"))
+
+
 def guided(args: argparse.Namespace) -> int:
+    ui = ig.Ui()
+    ask = Prompter(ui)
     prefix = Path(args.prefix).expanduser().resolve()
     login = (os.environ.get("USER") or getpass.getuser()).strip().lower()
     existing = read_config(prefix) or {}
@@ -244,10 +246,8 @@ def guided(args: argparse.Namespace) -> int:
 
     def new(kind: str, value: str) -> Optional[str]:
         if value.lower() == login:
-            return f"'{value}' is your login name, which is in every file path, so it can't be a marker"
-        if value in have[kind]:
-            return "already in your config"
-        return None
+            return f"'{value}' is your login name, which is in every file path, so it can't be used"
+        return "already in your config" if value in have[kind] else None
 
     def valid_name(value: str) -> Optional[str]:
         return "too short" if len(value) < 2 else new("names", value)
@@ -261,99 +261,135 @@ def guided(args: argparse.Namespace) -> int:
     def valid_other(value: str) -> Optional[str]:
         return "needs at least 4 characters" if len(value) < 4 else new("other", value)
 
-    print(paint("agent-identity-guard: guided setup", "1") + "\n")
-    print("This stops Claude Code and Codex from sending your name, email, phone number or other details")
-    print(f"to other machines. What you enter stays on this computer, in {prefix / 'config.json'},")
-    print("readable only by you. Press Enter to skip a question.\n")
+    print(ui.head("start", "agent-identity-guard", "setup"))
+    ask.say()
+    for line in ui.wrap(f"Stops Claude Code and Codex from sending your name, email, phone number or other details to "
+                        f"other machines. Your answers stay on this computer, in {ig.tilde(prefix / 'config.json')}, "
+                        "readable only by you. Press Enter to skip any question."):
+        ask.say(line)
+    ask.say()
 
     agents = found_agents()
     if agents:
-        print(f"Found: {', '.join(AGENT_NAMES[a] for a in agents)}.")
-    elif ask_yes("Found neither Claude Code (~/.claude) nor Codex (~/.codex). Set up for both anyway?", False):
-        agents = ["claude", "codex"]
+        print(f"{ui.mark('ok')}  {ui('Found ' + ' and '.join(AGENT_NAMES[a] for a in agents), 'bold')}")
     else:
-        print("Nothing to protect yet; install Claude Code or Codex and run ./setup.sh again.")
-        return 1
+        if not ask.yes("Found neither Claude Code nor Codex. Set up for both anyway?", default=False):
+            print(f"{ui(ui.sym['end'], 'gray')}  Nothing to protect yet. Install Claude Code or Codex, then run ./setup.sh again.")
+            return 1
+        agents = ["claude", "codex"]
     if any(have.values()):
-        counts = ", ".join(f"{len(v)} {k}" for k, v in have.items() if v)
-        print(f"Already in your config: {counts}. What you add now comes on top; edit the file to remove entries.")
-    print()
+        counts = ", ".join(ig.plural(len(v), ig.KIND_WORDS[k]) for k, v in have.items() if v)
+        ask.say(ui(f"Already in your config: {counts}. New answers are added; edit the file to remove entries.", "dim"))
+    ask.say()
 
     names: list = []
-    full = ask("1/5  Your full name as people write it (e.g. Jane Doe): ")
+    full = ask.text("Your full name", "As people write it, e.g. Jane Doe.", "step 1 of 5")
     if full:
         problem = valid_name(full)
         if problem:
-            print(f"      {problem}; not added.")
+            ask.say(f"{ui.mark('fail')} {ui(problem + '; not added', 'red')}")
         else:
             names.append(full)
             words = full.split()
             surname = words[-1] if len(words) > 1 else ""
-            if len(surname) >= 2 and not new("names", surname) and ask_yes(
-                f'      Also block "{surname}" on its own? Say no if it is a common word in your work.'
-            ):
+            if len(surname) >= 2 and not new("names", surname) and ask.yes(
+                    f'Also block "{surname}" on its own?', "Say no if it is a common word in your work."):
                 names.append(surname)
-    names += [n for n in ask_many("2/5  Other names, nicknames or handles you go by, one per line, empty line when done:", valid_name) if n not in names]
+    names += [n for n in ask.many("Other names, nicknames or handles", "One per line, empty line to finish.",
+                                  "step 2 of 5", valid_name) if n not in names]
 
-    emails = ask_many("3/5  Your email addresses (private and work), one per line, empty line when done:", valid_email)
+    emails = ask.many("Your email addresses", "Private and work, one per line, empty line to finish.", "step 3 of 5", valid_email)
     auto = dict(auto_now)
     found_git = git_email()
     if found_git and found_git not in emails and found_git not in have["emails"]:
-        auto["git_email"] = ask_yes(f"      Your git email is {found_git}. Treat it as yours too?", auto_now["git_email"])
+        auto["git_email"] = ask.yes(f"Your git email is {found_git}. Treat it as yours too?", default=auto_now["git_email"])
     if "claude" in agents:
-        auto["claude_code_account_email"] = ask_yes(
-            "      Treat the email you sign in to Claude Code with as yours too?", auto_now["claude_code_account_email"])
+        auto["claude_code_account_email"] = ask.yes("Treat the email you sign in to Claude Code with as yours too?",
+                                                    default=auto_now["claude_code_account_email"])
 
-    phones = ask_many("4/5  Phone numbers in any format (e.g. +44 20 7946 0958), one per line, empty line when done:", valid_phone)
-    other = ask_many("5/5  Anything else that identifies you (street address, customer or ID numbers), one per line:", valid_other)
+    phones = ask.many("Phone numbers", "Any format, e.g. +44 20 7946 0958. One per line, empty line to finish.",
+                      "step 4 of 5", valid_phone)
+    other = ask.many("Anything else that identifies you", "Street address, customer or ID numbers. One per line, "
+                     "empty line to finish.", "step 5 of 5", valid_other)
 
     additions = {kind: values for kind, values in
                  (("names", names), ("emails", emails), ("phones", phones), ("other", other)) if values}
-    print(paint("\nSummary", "1"))
-    for kind in ("names", "emails", "phones", "other"):
+    print(ui.head("done", "Summary"))
+    for kind, label in (("names", "Names"), ("emails", "Emails"), ("phones", "Phones"), ("other", "Other")):
         values = have[kind] + additions.get(kind, [])
         extra = []
         if kind == "emails":
             if auto["git_email"] and found_git:
-                extra.append(f"your git email {found_git}")
+                extra.append(f"+ your git email {found_git}")
             if auto["claude_code_account_email"] and "claude" in agents:
-                extra.append("your Claude Code account email")
-        shown = ", ".join(values + [f"+ {e}" for e in extra]) or "none"
-        print(f"  {kind:<7} {shown}")
-    print(f"  install {prefix}, hook for {', '.join(AGENT_NAMES[a] for a in agents)}")
+                extra.append("+ your Claude Code account email")
+        lines = [f" {ui.sym['dot']} ".join(values)] if values else []
+        lines += [ui(e, "dim") for e in extra]
+        for i, line in enumerate(lines or [ui("none", "dim")]):
+            ask.say(ui((label if i == 0 else "").ljust(10), "bold") + line)
+    ask.say(ui("Agents".ljust(10), "bold") + ", ".join(AGENT_NAMES[a] for a in agents))
+    ask.say(ui("Saved in".ljust(10), "bold") + ig.tilde(prefix))
     if not any(have.values()) and not additions:
-        print("\nWithout any details the guard only catches your git or Claude Code email.")
-    if not ask_yes("\nInstall now?"):
-        print("Nothing was changed.")
+        ask.say(ui("Without any details the guard only catches your git or Claude Code email.", "yellow"))
+    ask.say()
+    if not ask.yes("Install now?"):
+        print(f"{ui(ui.sym['end'], 'gray')}  Nothing was changed.")
         return 1
 
     python = pick_python(args.python)
-    print()
-    print("\n".join(install(prefix, agents, python, additions, False, auto)))
-    script = prefix / "identity_guard.py"
-    run = f"{shlex.quote(python)} {shlex.quote(str(script))}"
-    print(paint("\nChecking the setup", "1") + (" (asks Codex for the hook's status)" if "codex" in agents else "") + "...\n", flush=True)
-    subprocess.run([python, str(script), "doctor"])
+    steps = install(prefix, agents, python, additions, False, auto)
+    print(ui.head("done", "Installed"))
+    for tone, label, text in steps:
+        ask.say(ui.row(tone, label, text))
+    ask.say()
 
+    os.environ["IDENTITY_GUARD_CONFIG"] = str(prefix / "config.json")  # check the config just written
+    print(ui.head("done", "Status", "asking Codex for its hook status" if "codex" in agents else ""), flush=True)
+    checks = ig.doctor_checks(ui)
+    for line in ig.render_checks(ui, checks):
+        ask.say(line)
+    ask.say()
+
+    script = prefix / "identity_guard.py"
+    run = f"{shlex.quote(python)} {ig.tilde(script)}"
     sessions = past_sessions()
     if sessions:
-        print("\n" + boxed("Check your past sessions", (
-            f"Agents may have sent your details before this guard existed. The audit reads your {sessions:,} "
-            f"past Claude Code and Codex session{'' if sessions == 1 else 's'} on this computer (nothing leaves it) and lists which calls "
-            "carried your details and where they went. It can take a minute or two.")))
-        if ask_yes(paint("  Run the audit now?", "1")):
-            print(flush=True)
-            subprocess.run([python, str(script), "audit"])
+        print(ui.box("Look back: did agents already send your details?", [
+            *ui.wrap(f"The guard protects you from now on. The audit reads your {ig.plural(sessions, 'past session')} "
+                     "of Claude Code and Codex on this computer, nothing leaves it, and shows which calls carried "
+                     "your details and where they went. It can take a minute or two.", 2)], "cyan"))
+        ask.say()
+        if ask.yes("Run the audit now?"):
+            subprocess.run([python, str(script), "audit", "--embedded"])
+            ask.say()
         else:
-            print(f"  Run it any time: {run} audit")
+            ask.say(ui(f"Run it any time: {run} audit", "dim"))
+            ask.say()
 
-    print(paint("\nNext", "1"))
-    if "codex" in agents:
-        print("  " + paint("- Codex runs a new hook only once you approve it: start `codex`, type /hooks, trust identity-guard.", "1", "36"))
+    codex = next((c for c in checks if c.label == "Codex CLI"), None)
+    if codex is not None and codex.tone == "warn" and "/hooks" in codex.fix:
+        print(ui.box(f"{ui.sym['warn']} One more step: approve the hook in Codex", [
+            *ui.wrap("Codex skips new hooks until you approve them. Until you do, Codex can still send your details.", 2),
+            "",
+            f"  1. Start Codex      {ui('codex', 'bold')}",
+            f"  2. Open the hooks   {ui('/hooks', 'bold')}",
+            f"  3. Trust            {ui('identity-guard', 'bold')}",
+            "",
+            ui(f"Then check: {run} doctor", "dim"),
+        ]))
+        print()
+        done = "Claude Code is protected now; Codex is once you approve the hook." if "claude" in agents else \
+            "Installed. Codex is protected once you approve the hook."
+    else:
+        done = "Your details are guarded in " + " and ".join(AGENT_NAMES[a] for a in agents) + "."
+    print(f"{ui(ui.sym['end'], 'gray')}  {ui('Done.', 'bold', 'green')} {done}")
     example = (emails or have["emails"] or ["jane.doe@example.com"])[0]
-    print(f"  - Try it: {run} check 'curl -A \"bot ({example})\" https://example.org'")
-    print(f"  - Change your details any time in {prefix / 'config.json'}, or run ./setup.sh again.")
+    print(f"   {ui('Try it', 'bold')}   {run} check 'curl -A \"bot ({example})\" https://example.org'")
+    print(f"   {ui('Change', 'bold')}   run ./setup.sh again, or edit {ig.tilde(prefix / 'config.json')}")
     return 0
+
+
+# --- flags ------------------------------------------------------------------------------------------
 
 
 def main() -> int:
@@ -368,11 +404,17 @@ def main() -> int:
     parser.add_argument("--uninstall", action="store_true", help="remove the hooks from Claude Code and Codex")
     parser.add_argument("--purge", action="store_true", help="with --uninstall: also delete the install folder (config and log)")
     args = parser.parse_args()
+    ig.replace_unprintable()
+    ui = ig.Ui()
+    end = ui(ui.sym["end"], "gray")
     if args.guided:
         try:
             return guided(args)
+        except Stopped:
+            print(f"{end}  {ui.mark('fail')} No answer, so nothing was changed.")
+            return 1
         except KeyboardInterrupt:
-            print("\nStopped; nothing more was changed.")
+            print(f"\n{end}  Stopped; nothing more was changed.")
             return 130
 
     prefix = Path(args.prefix).expanduser().resolve()
@@ -384,26 +426,29 @@ def main() -> int:
         sys.exit("Found neither ~/.claude nor ~/.codex; pass --agents claude,codex to install anyway.")
 
     if args.uninstall:
-        report = []
+        steps = []
         if "claude" in agents:
-            report.append(update_hooks_file(claude_home() / "settings.json", None, args.dry_run))
+            steps.append(("Claude Code", *update_hooks_file(ig.claude_home() / "settings.json", None, args.dry_run)))
         if "codex" in agents:
-            report.append(update_hooks_file(codex_home() / "hooks.json", None, args.dry_run))
+            steps.append(("Codex CLI", *update_hooks_file(ig.codex_home() / "hooks.json", None, args.dry_run)))
         if args.purge and prefix.exists():
-            report.append(f"would delete {prefix}" if args.dry_run else f"deleted {prefix}")
+            steps.append(("Install", "info" if args.dry_run else "ok", f"{'would delete' if args.dry_run else 'deleted'} {ig.tilde(prefix)}"))
             if not args.dry_run:
                 shutil.rmtree(prefix)
-        print("\n".join(report))
+        for label, tone, text in steps:
+            print(ui.row(tone, label, text))
         return 0
 
     python = pick_python(args.python)
     additions = {MARKER_FLAGS[flag]: getattr(args, flag) for flag in MARKER_FLAGS if getattr(args, flag)}
-    print("\n".join(install(prefix, agents, python, additions, args.dry_run)))
-    script = prefix / "identity_guard.py"
-    print(f"\nNext:\n  1. List what identifies you in {prefix / 'config.json'} (names, emails, phones, other).")
+    for tone, label, text in install(prefix, agents, python, additions, args.dry_run):
+        print(ui.row(tone, label, text))
+    run = f"{shlex.quote(python)} {ig.tilde(prefix / 'identity_guard.py')}"
+    print()
+    print(f"{ui.mark('info')} List what identifies you in {ig.tilde(prefix / 'config.json')}, or run ./setup.sh for guided questions.")
     if "codex" in agents:
-        print("  2. Codex runs new hooks only once you trust them: start `codex`, type /hooks, trust identity-guard.")
-    print(f"  3. Check the setup: {shlex.quote(python)} {shlex.quote(str(script))} doctor")
+        print(f"{ui.mark('warn')} {ui('Codex runs new hooks only once you approve them: start `codex`, type /hooks, trust identity-guard.', 'bold', 'yellow')}")
+    print(f"{ui.mark('info')} Check the setup: {run} doctor")
     return 0
 
 

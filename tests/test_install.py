@@ -122,7 +122,7 @@ class GuidedSetupTests(unittest.TestCase):
         )
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         out = done.stdout
-        self.assertIn("can't be a marker", out)
+        self.assertIn("can't be used", out)
         self.assertIn("doesn't look like an email address", out)
         self.assertIn("needs at least 6 digits", out)
         self.assertIn("Your git email is jane.work@example.org", out)
@@ -136,12 +136,13 @@ class GuidedSetupTests(unittest.TestCase):
         self.assertEqual(oct(self.config_file.stat().st_mode & 0o777), "0o600")
         settings = json.loads((self.home / ".claude" / "settings.json").read_text())
         self.assertIn("identity_guard.py", settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"])
-        self.assertLess(out.index("Summary"), out.index("copied identity_guard.py"))
-        self.assertLess(out.index("copied identity_guard.py"), out.index("Claude Code  registered"))  # then doctor
-        self.assertLess(out.index("Claude Code  registered"), out.index("Check your past sessions"))  # then the audit offer
-        self.assertIn("reads your 1 past Claude Code and Codex session on", out)
+        self.assertLess(out.index("Summary"), out.index("Installed"))
+        self.assertLess(out.index("Installed"), out.index("Claude Code  protected"))  # then the status
+        self.assertLess(out.index("Claude Code  protected"), out.index("Look back"))  # then the audit offer
+        self.assertIn("reads your 1 past", out)
         self.assertIn("Run it any time:", out)  # declined: says how to run it later
-        self.assertLess(out.index("Check your past sessions"), out.index("\nNext"))  # next steps come last
+        self.assertLess(out.index("Look back"), out.index("Done."))  # the closing line comes last
+        self.assertNotIn("One more step", out)  # no Codex here, so nothing to approve
         self.assertNotIn("\033[", out)  # no colors outside a terminal
 
     def test_second_run_adds_on_top(self) -> None:
@@ -149,7 +150,7 @@ class GuidedSetupTests(unittest.TestCase):
         done = self.run_setup("", "", "second@example.org", "", "", "", "", "", "", "", script="install.py")
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertIn("Already in your config", done.stdout)
-        self.assertIn("Scanned 1 Claude Code and 0 Codex tool calls.", done.stdout)  # Enter accepts the audit
+        self.assertIn("Scanned 1 Claude Code and 0 Codex tool calls", done.stdout)  # Enter accepts the audit
         self.assertEqual(self.config()["markers"]["emails"], ["jane@example.org", "second@example.org"])
         self.assertEqual(self.config()["markers"]["names"], ["Jane Testperson", "Testperson"])
         self.assertFalse(self.config()["auto_markers"]["git_email"])  # the earlier answer is the new default
