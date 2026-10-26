@@ -24,39 +24,52 @@ agent is told why and what to do instead, and you see a one-line notice.
 
 ## Quick start
 
+One command clones the repo and starts the guided setup:
+
 ```bash
-git clone git@github.com:fwin-git/agent-identity-guard.git
-cd agent-identity-guard
-python3 install.py --name "Jane Doe" --name "Doe" --email jane.doe@example.com --phone "+44 20 7946 0958"
+gh repo clone fwin-git/agent-identity-guard && ./agent-identity-guard/setup.sh
 ```
 
+The setup asks for your details, shows a summary, installs the hook for every agent it finds (Claude
+Code, Codex CLI) and checks the result. Press Enter to skip a question. Your details stay on your
+computer, in `~/.identity-guard/config.json`, readable only by you.
+
 ```
+1/5  Your full name as people write it (e.g. Jane Doe): Jane Doe
+      Also block "Doe" on its own? Say no if it is a common word in your work. [Y/n]
+2/5  Other names, nicknames or handles you go by, one per line, empty line when done:
+    + jdoe42
+    +
+3/5  Your email addresses (private and work), one per line, empty line when done:
+    + jane.doe@example.com
+    +
+      Your git email is jane@work.example. Treat it as yours too? [Y/n]
+      Treat the email you sign in to Claude Code with as yours too? [Y/n]
+4/5  Phone numbers in any format (e.g. +44 20 7946 0958), one per line, empty line when done:
+    + +44 20 7946 0958
+    +
+5/5  Anything else that identifies you (street address, customer or ID numbers), one per line:
+    +
+
+Summary
+  names   Jane Doe, Doe, jdoe42
+  emails  jane.doe@example.com, + your git email jane@work.example, + your Claude Code account email
+  phones  +44 20 7946 0958
+  other   none
+  install ~/.identity-guard, hook for Claude Code, Codex CLI
+
+Install now? [Y/n]
+
 copied identity_guard.py to ~/.identity-guard/identity_guard.py
-created ~/.identity-guard/config.json (+4 marker(s))
-updated ~/.claude/settings.json (backup settings.json.bak)
+created ~/.identity-guard/config.json (+5 change(s))
+updated ~/.claude/settings.json
 updated ~/.codex/hooks.json
 
-Next:
-  1. List what identifies you in ~/.identity-guard/config.json (names, emails, phones, other).
-  2. Codex runs new hooks only once you trust them: start `codex`, type /hooks, trust identity-guard.
-  3. Check the setup: /usr/bin/python3 ~/.identity-guard/identity_guard.py doctor
-```
+Checking the setup (asks Codex for the hook's status)...
 
-1. **Add the rest of your details** to `~/.identity-guard/config.json` (see [Configuration](#configuration)).
-   The file is created readable only by you.
-2. **Codex only:** Codex skips new hooks until you approve them. Start `codex`, type `/hooks`, and trust
-   the identity-guard hook. Codex asks again whenever `~/.codex/hooks.json` changes. Updating the
-   script itself doesn't need a new approval.
-3. **Check the setup:**
-
-```bash
-python3 ~/.identity-guard/identity_guard.py doctor
-```
-
-```
 config       ~/.identity-guard/config.json (found)
-emails        1  j***@example.com
-names         2  J*** D**, D**
+emails        2  j***@example.com, j***@work.example
+names         3  J*** D**, D**, j*****
 phones        1  *********958
 other         0
 auto         claude_code_account_email, git_email (found 1 email(s))
@@ -64,12 +77,31 @@ ignored      login name 'jane'
 log          ~/.identity-guard/guard.log (0 blocked call(s))
 Claude Code  registered (matcher Bash|PowerShell|WebFetch|WebSearch|Write|Edit|MultiEdit|NotebookEdit|mcp__.*)
 Codex CLI    registered, NOT trusted yet: run codex, type /hooks, trust identity-guard
+
+Next
+  - Codex runs a new hook only once you approve it: start `codex`, type /hooks, trust identity-guard.
+  - Try it: /usr/bin/python3 ~/.identity-guard/identity_guard.py check 'curl -A "bot (jane.doe@example.com)" https://example.org'
+  - Change your details any time in ~/.identity-guard/config.json, or run ./setup.sh again.
+
+Scan your past Claude Code and Codex sessions for details that already went out? It reads only local transcripts and can take a minute. [y/N]
 ```
 
-`doctor` asks Codex itself for the hook's trust status (`trusted`, `untrusted`, or `modified` when the
-hook changed since you trusted it), so what it says is what Codex will do.
+The setup refuses entries that can't work: an email without `@`, a phone number with fewer than six
+digits, or your login name, which appears in every file path. Run `./setup.sh` again any time to add
+details; it keeps what you entered before. To remove an entry, edit `config.json`.
 
-4. **See what already leaked:**
+After the setup:
+
+- **Codex only:** Codex skips a new hook until you approve it. Start `codex`, type `/hooks`, and trust
+  the identity-guard hook. Codex asks again whenever `~/.codex/hooks.json` changes; updating the script
+  itself doesn't need a new approval.
+- **Check the setup any time** with `python3 ~/.identity-guard/identity_guard.py doctor`. It asks Codex
+  itself for the hook's trust status (`trusted`, `untrusted`, or `modified` when the hook changed since
+  you trusted it), so what it says is what Codex will do.
+
+### See what already leaked
+
+The setup offers this at the end; you can also run it any time:
 
 ```bash
 python3 ~/.identity-guard/identity_guard.py audit
@@ -88,8 +120,19 @@ Not blocked at the time, by destination:
 `audit --details` lists each call with time, agent, tool, kind of detail, destination and transcript.
 It never prints the content.
 
-The installer needs only Python 3.9 or newer. On macOS the hook runs with `/usr/bin/python3`, because it
-works without shell profiles or version managers; pass `--python` to pick another.
+### Install without questions
+
+For scripts and dotfiles, `install.py` takes the same details as flags (each one repeatable) and asks
+nothing:
+
+```bash
+python3 install.py --name "Jane Doe" --name "Doe" --email jane.doe@example.com --phone "+44 20 7946 0958"
+```
+
+`--dry-run` shows what would change, and `--agents claude`, `--agents codex` or `--agents both` picks the
+agents instead of detecting them. Both `setup.sh` and `install.py` need Python 3.9 or newer.
+`setup.sh` finds one for you. On macOS the hook itself runs with `/usr/bin/python3`, because that works
+without shell profiles or version managers; pass `--python` to pick another.
 
 ## Examples
 
@@ -289,7 +332,7 @@ python3 -m unittest discover -s tests -v
 
 The tests use a made-up identity (`Jane Testperson`) and temporary folders, and never touch your real
 config or agent settings. `tests/test_identity_guard.py` covers the rules with cases that must block and
-look-alikes that must pass. `tests/test_install.py` installs into a throwaway home folder.
+look-alikes that must pass. `tests/test_install.py` installs into a throwaway home folder, including the guided setup with scripted answers.
 
 ## Uninstall
 
