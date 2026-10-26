@@ -31,7 +31,7 @@ jobs:
         run: |
           set "USERPROFILE=%RUNNER_TEMP%\home"
           mkdir "%USERPROFILE%\.claude"
-          setup.cmd < NUL
+          call setup.cmd < NUL
           if not errorlevel 1 exit /b 1
           if exist "%USERPROFILE%\.identity-guard" exit /b 1
           echo setup.cmd ran and changed nothing
