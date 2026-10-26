@@ -20,7 +20,8 @@ next tool call; nothing needs restarting.
   },
   "ignore": [],
   "local_hosts": ["*.home.arpa", "192.168.1.*"],
-  "log_file": "guard.log"
+  "log_file": "guard.log",
+  "session_note": true
 }
 ```
 
@@ -35,10 +36,12 @@ next tool call; nothing needs restarting.
 | `ignore` | Values never treated as identity. Your login name is always ignored, because it's in every home path. |
 | `local_hosts` | Extra host patterns (fnmatch globs) that count as your own machines; requests there may carry your details. Always local: `localhost`, `127.*`, `::1`, `0.0.0.0`, `*.localhost`, `*.local`, `*.test`, `*.internal` and hosts without a dot. |
 | `log_file` | Where blocked calls are logged, relative to the config file. `""` turns logging off. The log records time, agent, session, tool, kind of detail and folder, never the content. |
+| `session_note` | `true` (the default) adds a short note to the agent's context when a session starts: never identify you to sites, use an anonymous User-Agent, back off on HTTP 429, or ask you. It contains none of your details. `false` turns it off; the hook stays registered and adds nothing, so Codex doesn't ask for a new approval. |
 
 `./setup.sh` and `install.py --name/--email/--phone/--other` add to this file, and neither ever
 overwrites it. `identity_guard.py doctor` shows what's in effect, with values masked:
 
+<!-- sample: doctor/All set -->
 ```
 ┌  agent-identity-guard  doctor
 │
@@ -50,6 +53,7 @@ overwrites it. `identity_guard.py doctor` shows what's in effect, with values ma
 │                 also your git email and your Claude Code account email, read on every call
 │  ✔ Claude Code  protected
 │  ✔ Codex CLI    protected
+│  ✔ Session note agents learn the rule when a session starts (Claude Code, Codex CLI)
 │  ● Log          0 blocked calls · ~/.identity-guard/guard.log
 │
 └  ✔ All set. The guard checks every tool call for your details.

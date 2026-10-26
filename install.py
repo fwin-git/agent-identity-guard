@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Install agent-identity-guard for Claude Code and Codex CLI, or remove it.
 
-    ./setup.sh                                                        guided setup (asks, installs, checks)
+    ./setup.sh  (Windows: setup.cmd)                                  guided setup (asks, installs, checks)
     python3 install.py --name "Jane Doe" --email jane@example.com    install without questions, adding markers
     python3 install.py --dry-run                                      show what would change
     python3 install.py --uninstall [--purge]                          remove the hooks [and ~/.identity-guard]
@@ -34,15 +34,27 @@ MARKER_FLAGS = {"name": "names", "email": "emails", "phone": "phones", "other": 
 AGENT_NAMES = {"claude": "Claude Code", "codex": "Codex CLI"}
 
 
+WINDOWS = os.name == "nt"
+OUR_EVENTS = ("PreToolUse", "SessionStart")
+
+
 def found_agents() -> list:
     return [agent for agent, home in (("claude", ig.claude_home()), ("codex", ig.codex_home())) if home.exists()]
 
 
 def pick_python(requested: Optional[str]) -> str:
-    """An absolute python3 (3.9+) the agents can start without a shell profile or version manager."""
-    candidates = [requested] if requested else ["/usr/bin/python3", shutil.which("python3"), sys.executable]
+    """An absolute Python 3.9+ the agents can start without a shell profile or version manager: /usr/bin/python3
+    on macOS and Linux when it is new enough, on Windows the Python running this installer."""
+    if requested:
+        candidates = [requested]
+    elif WINDOWS:
+        candidates = [sys.executable, shutil.which("python")]
+    else:
+        candidates = ["/usr/bin/python3", shutil.which("python3"), sys.executable]
     for candidate in filter(None, candidates):
         path = os.path.realpath(candidate)
+        if WINDOWS and "WindowsApps" in path:  # the Microsoft Store stub, not a real Python
+            continue
         try:
             version = subprocess.run(
                 [path, "-c", "import sys; print(sys.version_info >= (3, 9))"], capture_output=True, text=True, timeout=10
@@ -54,16 +66,50 @@ def pick_python(requested: Optional[str]) -> str:
     sys.exit("identity-guard needs Python 3.9 or newer; pass one with --python")
 
 
-def is_ours(entry: dict) -> bool:
-    command = str(entry.get("command", ""))
-    return "identity_guard.py" in command or "identity-guard.py" in command
+def python_version(python: str) -> str:
+    try:
+        return subprocess.run([python, "-c", "import sys; print('%d.%d' % sys.version_info[:2])"],
+                              capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def hook_entries(python: str, script: object, windows: bool = WINDOWS, py_launcher: Optional[str] = None) -> dict:
+    """How each agent starts the guard. On macOS and Linux both get a quoted shell command line. On Windows,
+    Claude Code starts Python directly (exec form, no shell involved), and Codex gets one command for cmd and
+    PowerShell alike: the py launcher first, because a quoted program path would need PowerShell's & operator,
+    and the script path in quotes, because user folders often contain spaces."""
+    script = str(script)
+    if not windows:
+        command = f"{shlex.quote(python)} {shlex.quote(script)}"
+        return {"claude": {"command": command}, "codex": {"command": command}}
+    if py_launcher is None and shutil.which("py"):
+        version = python_version(python)
+        py_launcher = f"py -{version}" if version else "py -3"
+    program = py_launcher or (f'"{python}"' if " " in python else python)
+    command = f'{program} "{script}"'
+    return {"claude": {"command": python, "args": [script]}, "codex": {"command": command, "commandWindows": command}}
+
+
+def hook_group(entry: dict, matcher: Optional[str], status: Optional[str] = None) -> dict:
+    hook = {"type": "command", **entry, "timeout": 10}
+    if status:
+        hook["statusMessage"] = status
+    return {"matcher": matcher, "hooks": [hook]} if matcher else {"hooks": [hook]}
+
+
+def run_command(python: str, script: Path) -> str:
+    """The command a person types to run the guard (doctor, check, audit)."""
+    if WINDOWS:
+        return hook_entries(python, script)["codex"]["command"]
+    return f"{shlex.quote(python)} {ig.tilde(script)}"
 
 
 def without_ours(groups: list) -> list:
-    """PreToolUse groups with every identity-guard hook removed (and groups left empty dropped)."""
+    """Hook groups with every identity-guard hook removed (and groups left empty dropped)."""
     kept = []
     for group in groups:
-        hooks = [entry for entry in group.get("hooks") or [] if not is_ours(entry)]
+        hooks = [entry for entry in group.get("hooks") or [] if not ig.is_guard_entry(entry)]
         if hooks:
             kept.append({**group, "hooks": hooks})
         elif not group.get("hooks"):
@@ -71,20 +117,21 @@ def without_ours(groups: list) -> list:
     return kept
 
 
-def update_hooks_file(path: Path, entry_group: Optional[dict], dry_run: bool) -> Tuple[str, str]:
-    """Put entry_group into the file's hooks.PreToolUse (None removes ours). Returns (tone, what happened)."""
+def update_hooks_file(path: Path, groups_by_event: Optional[dict], dry_run: bool) -> Tuple[str, str]:
+    """Put our hook group for each event into the file (None removes ours everywhere). Returns (tone, what happened)."""
     try:
         data = json.loads(path.read_text()) if path.exists() else {}
     except ValueError as error:
         return "fail", f"skipped {ig.tilde(path)}: not valid JSON ({error}); fix it and run again"
     hooks = data.setdefault("hooks", {})
-    groups = without_ours(hooks.get("PreToolUse") or [])
-    if entry_group:
-        groups.append(entry_group)
-    if groups:
-        hooks["PreToolUse"] = groups
-    else:
-        hooks.pop("PreToolUse", None)
+    for event in OUR_EVENTS:
+        groups = without_ours(hooks.get(event) or [])
+        if groups_by_event and event in groups_by_event:
+            groups.append(groups_by_event[event])
+        if groups:
+            hooks[event] = groups
+        else:
+            hooks.pop(event, None)
     if not hooks:
         data.pop("hooks", None)
     new_text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
@@ -138,9 +185,9 @@ def write_config(prefix: Path, additions: dict, dry_run: bool, auto: Optional[di
 
 
 def install(prefix: Path, agents: list, python: str, additions: dict, dry_run: bool, auto: Optional[dict] = None) -> list:
-    """Copy the guard, write the config, register the hooks. Returns (tone, label, what happened) per part."""
+    """Copy the guard, write the config, register the hooks (tool calls and session start). One step per part."""
     script = prefix / "identity_guard.py"
-    command = f"{shlex.quote(python)} {shlex.quote(str(script))}"
+    entries = hook_entries(python, script)
     if dry_run:
         steps = [("info", "Guard", f"would copy to {ig.tilde(script)}")]
     else:
@@ -151,13 +198,13 @@ def install(prefix: Path, agents: list, python: str, additions: dict, dry_run: b
     tone, text = write_config(prefix, additions, dry_run, auto)
     steps.append((tone, "Config", text))
     if "claude" in agents:
-        group = {"matcher": CLAUDE_MATCHER, "hooks": [{"type": "command", "command": command, "timeout": 10}]}
-        tone, text = update_hooks_file(ig.claude_home() / "settings.json", group, dry_run)
+        groups = {"PreToolUse": hook_group(entries["claude"], CLAUDE_MATCHER), "SessionStart": hook_group(entries["claude"], None)}
+        tone, text = update_hooks_file(ig.claude_home() / "settings.json", groups, dry_run)
         steps.append((tone, "Claude Code", text))
     if "codex" in agents:
-        group = {"matcher": CODEX_MATCHER, "hooks": [
-            {"type": "command", "command": command, "timeout": 10, "statusMessage": "identity-guard"}]}
-        tone, text = update_hooks_file(ig.codex_home() / "hooks.json", group, dry_run)
+        groups = {"PreToolUse": hook_group(entries["codex"], CODEX_MATCHER, "identity-guard"),
+                  "SessionStart": hook_group(entries["codex"], None, "identity-guard")}
+        tone, text = update_hooks_file(ig.codex_home() / "hooks.json", groups, dry_run)
         steps.append((tone, "Codex CLI", text))
     return steps
 
@@ -279,7 +326,7 @@ def guided(args: argparse.Namespace) -> int:
         print(f"{ui.mark('ok')}  {ui('Found ' + ' and '.join(AGENT_NAMES[a] for a in agents), 'bold')}")
     else:
         if not ask.yes("Found neither Claude Code nor Codex. Set up for both anyway?", default=False):
-            print(f"{ui(ui.sym['end'], 'gray')}  Nothing to protect yet. Install Claude Code or Codex, then run ./setup.sh again.")
+            print(f"{ui(ui.sym['end'], 'gray')}  Nothing to protect yet. Install Claude Code or Codex, then run {ig.SETUP_COMMAND} again.")
             return 1
         agents = ["claude", "codex"]
     if any(have.values()):
@@ -352,7 +399,7 @@ def guided(args: argparse.Namespace) -> int:
     ask.say()
 
     script = prefix / "identity_guard.py"
-    run = f"{shlex.quote(python)} {ig.tilde(script)}"
+    run = run_command(python, script)
     sessions = past_sessions()
     if sessions:
         print(ui.box("Look back: did agents already send your details?", [
@@ -374,7 +421,7 @@ def guided(args: argparse.Namespace) -> int:
             "",
             f"  1. Start Codex      {ui('codex', 'bold')}",
             f"  2. Open the hooks   {ui('/hooks', 'bold')}",
-            f"  3. Trust            {ui('identity-guard', 'bold')}",
+            f"  3. Trust            {ui('identity-guard', 'bold')} (both of its hooks)",
             "",
             ui(f"Then check: {run} doctor", "dim"),
         ]))
@@ -386,7 +433,7 @@ def guided(args: argparse.Namespace) -> int:
     print(f"{ui(ui.sym['end'], 'gray')}  {ui('Done.', 'bold', 'green')} {done}")
     example = (emails or have["emails"] or ["jane.doe@example.com"])[0]
     print(f"   {ui('Try it', 'bold')}   {run} check 'curl -A \"bot ({example})\" https://example.org'")
-    print(f"   {ui('Change', 'bold')}   run ./setup.sh again, or edit {ig.tilde(prefix / 'config.json')}")
+    print(f"   {ui('Change', 'bold')}   run {ig.SETUP_COMMAND} again, or edit {ig.tilde(prefix / 'config.json')}")
     return 0
 
 
@@ -395,7 +442,7 @@ def guided(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--guided", action="store_true", help="ask for your details step by step (what ./setup.sh runs)")
+    parser.add_argument("--guided", action="store_true", help="ask for your details step by step (what setup.sh and setup.cmd run)")
     parser.add_argument("--prefix", default="~/.identity-guard", help="install folder (default ~/.identity-guard)")
     parser.add_argument("--agents", default="auto", help="claude, codex, both or auto (whichever is installed)")
     parser.add_argument("--python", help="python3 the hook runs with (default /usr/bin/python3 when it is 3.9+)")
@@ -444,11 +491,11 @@ def main() -> int:
     additions = {MARKER_FLAGS[flag]: getattr(args, flag) for flag in MARKER_FLAGS if getattr(args, flag)}
     for tone, label, text in install(prefix, agents, python, additions, args.dry_run):
         print(ui.row(tone, label, text))
-    run = f"{shlex.quote(python)} {ig.tilde(prefix / 'identity_guard.py')}"
+    run = run_command(python, prefix / "identity_guard.py")
     print()
-    print(f"{ui.mark('info')} List what identifies you in {ig.tilde(prefix / 'config.json')}, or run ./setup.sh for guided questions.")
+    print(f"{ui.mark('info')} List what identifies you in {ig.tilde(prefix / 'config.json')}, or run {ig.SETUP_COMMAND} for guided questions.")
     if "codex" in agents:
-        print(f"{ui.mark('warn')} {ui('Codex runs new hooks only once you approve them: start `codex`, type /hooks, trust identity-guard.', 'bold', 'yellow')}")
+        print(f"{ui.mark('warn')} {ui('Codex runs new hooks only once you approve them: start `codex`, type /hooks, trust identity-guard (both of its hooks).', 'bold', 'yellow')}")
     print(f"{ui.mark('info')} Check the setup: {run} doctor")
     return 0
 

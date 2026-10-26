@@ -4,14 +4,24 @@
 
 ## Guided setup
 
+macOS and Linux:
+
 ```bash
 git clone https://github.com/fwin-git/agent-identity-guard.git && ./agent-identity-guard/setup.sh
 ```
 
-`setup.sh` finds a Python 3.9 or newer and starts `install.py --guided`. The whole session below used a
+Windows, in PowerShell or cmd:
+
+```powershell
+git clone https://github.com/fwin-git/agent-identity-guard.git; .\agent-identity-guard\setup.cmd
+```
+
+`setup.sh` (`setup.cmd` on Windows, which tries the `py` launcher first) finds a Python 3.9 or newer and
+starts `install.py --guided`. The whole session below used a
 made-up identity (Jane Doe), with Claude Code and Codex installed and a few earlier sessions that leaked.
 Press Enter to skip any question.
 
+<!-- sample: Guided setup/First run, Codex still to approve -->
 ```
 ┌  agent-identity-guard  setup
 │
@@ -83,7 +93,8 @@ Press Enter to skip any question.
 │                 also your git email and your Claude Code account email, read on every call
 │  ✔ Claude Code  protected
 │  ▲ Codex CLI    waiting for your approval
-│                 → start `codex`, type /hooks, and trust identity-guard
+│                 → start `codex`, type /hooks, and trust identity-guard (both hooks)
+│  ✔ Session note agents learn the rule when a session starts (Claude Code, Codex CLI)
 │  ● Log          0 blocked calls · ~/.identity-guard/guard.log
 │
 ╭─ Look back: did agents already send your details? ───────────────────────────────╮
@@ -116,7 +127,7 @@ Press Enter to skip any question.
 │                                                                                  │
 │    1. Start Codex      codex                                                     │
 │    2. Open the hooks   /hooks                                                    │
-│    3. Trust            identity-guard                                            │
+│    3. Trust            identity-guard (both of its hooks)                        │
 │                                                                                  │
 │  Then check: /usr/bin/python3 ~/.identity-guard/identity_guard.py doctor         │
 │                                                                                  │
@@ -132,10 +143,17 @@ the audit. The Codex panel is yellow and appears only while Codex still needs ap
 past sessions, the look-back is skipped.
 
 The setup copies `identity_guard.py` to `~/.identity-guard/`, so the clone can be moved or deleted
-afterwards. It writes your answers to `~/.identity-guard/config.json`, readable only by you, and adds
-the hook to:
-- **Claude Code:** `~/.claude/settings.json`, as a `PreToolUse` hook for shell, web, file and MCP tools
-- **Codex:** `~/.codex/hooks.json`, as a `PreToolUse` hook for every tool
+afterwards. It writes your answers to `~/.identity-guard/config.json`, readable only by you, and adds two
+hooks to each agent:
+- **`PreToolUse`** checks each tool call. In Claude Code (`~/.claude/settings.json`) it runs for shell,
+  web, file and MCP tools; in Codex (`~/.codex/hooks.json`) for every tool.
+- **`SessionStart`** adds the [session note](how-it-works.md#at-session-start-the-note), so agents
+  know the rule before a site pushes back.
+
+On Windows, Claude Code starts the guard's Python directly, without a shell. Codex gets one command that
+works in both cmd and PowerShell: the `py` launcher, then the quoted path to the guard.
+
+On Windows, `~` means your user folder (`%USERPROFILE%`).
 
 Each settings file gets a `.bak` copy before it changes, and other hooks in it stay as they are.
 
@@ -147,6 +165,7 @@ The setup says why and lets you correct the entry:
 - a phone number with fewer than six digits
 - your login name, which appears in every file path, so it would match everywhere
 
+<!-- sample: Guided setup/Entries it refuses -->
 ```
 ┌  agent-identity-guard  setup
 │
@@ -215,6 +234,7 @@ The setup says why and lets you correct the entry:
 Run `./setup.sh` again any time. It keeps what you entered before and adds new answers on top, and your
 earlier yes/no answers become the defaults. To remove an entry, edit `config.json`.
 
+<!-- sample: Guided setup/Running it again -->
 ```
 ┌  agent-identity-guard  setup
 │
@@ -280,6 +300,7 @@ earlier yes/no answers become the defaults. To remove an entry, edit `config.jso
 │                 also your git email and your Claude Code account email, read on every call
 │  ✔ Claude Code  protected
 │  ● Codex CLI    not installed
+│  ✔ Session note agents learn the rule when a session starts (Claude Code)
 │  ● Log          0 blocked calls · ~/.identity-guard/guard.log
 │
 ╭─ Look back: did agents already send your details? ───────────────────────────────╮
@@ -306,7 +327,7 @@ Codex runs a hook only after you approve it once. Until then, Codex can still se
 
 1. Start `codex`
 2. Type `/hooks`
-3. Trust **identity-guard**
+3. Trust **identity-guard**, both of its hooks (tool calls and session start)
 
 `identity_guard.py doctor` asks Codex itself for the hook's status: approved (`protected`), `waiting for
 your approval`, or `changed since you approved it`. Codex asks again whenever `~/.codex/hooks.json`
@@ -321,6 +342,7 @@ For scripts and dotfiles, `install.py` takes your details as flags (each one rep
 python3 install.py --name "Jane Doe" --name "Doe" --email jane.doe@example.com --phone "+44 20 7946 0958"
 ```
 
+<!-- sample: install.py (no questions)/Install with flags -->
 ```
 ✔ Guard        copied to ~/.identity-guard/identity_guard.py
 ✔ Config       created ~/.identity-guard/config.json (2 changes)
@@ -328,7 +350,7 @@ python3 install.py --name "Jane Doe" --name "Doe" --email jane.doe@example.com -
 ✔ Codex CLI    updated ~/.codex/hooks.json
 
 ● List what identifies you in ~/.identity-guard/config.json, or run ./setup.sh for guided questions.
-▲ Codex runs new hooks only once you approve them: start `codex`, type /hooks, trust identity-guard.
+▲ Codex runs new hooks only once you approve them: start `codex`, type /hooks, trust identity-guard (both of its hooks).
 ● Check the setup: /usr/bin/python3 ~/.identity-guard/identity_guard.py doctor
 ```
 
@@ -342,6 +364,7 @@ python3 install.py --name "Jane Doe" --name "Doe" --email jane.doe@example.com -
 
 If an agent's settings file isn't valid JSON, the installer leaves it alone and says so:
 
+<!-- sample: install.py (no questions)/Agent settings file broken -->
 ```
 ✔ Guard        copied to ~/.identity-guard/identity_guard.py
 ✔ Config       created ~/.identity-guard/config.json (1 change)
@@ -349,17 +372,20 @@ If an agent's settings file isn't valid JSON, the installer leaves it alone and 
 ✔ Codex CLI    updated ~/.codex/hooks.json
 
 ● List what identifies you in ~/.identity-guard/config.json, or run ./setup.sh for guided questions.
-▲ Codex runs new hooks only once you approve them: start `codex`, type /hooks, trust identity-guard.
+▲ Codex runs new hooks only once you approve them: start `codex`, type /hooks, trust identity-guard (both of its hooks).
 ● Check the setup: /usr/bin/python3 ~/.identity-guard/identity_guard.py doctor
 ```
 
 ## Uninstall
 
 ```bash
-python3 install.py --uninstall            # remove the hooks from Claude Code and Codex
+python3 install.py --uninstall            # remove both hooks from Claude Code and Codex
 python3 install.py --uninstall --purge    # also delete ~/.identity-guard (config and log)
 ```
 
+On Windows, use `py install.py …` instead of `python3 install.py …`.
+
+<!-- sample: install.py (no questions)/Uninstall and purge -->
 ```
 ✔ Claude Code  updated ~/.claude/settings.json (backup settings.json.bak)
 ✔ Codex CLI    updated ~/.codex/hooks.json (backup hooks.json.bak)

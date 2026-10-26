@@ -130,6 +130,24 @@ class ChannelTests(GuardTestCase):
         ]:
             self.assertDenied("Bash", {"command": command})
 
+    def test_powershell_and_windows_commands(self) -> None:
+        for command in [
+            f'Invoke-WebRequest -Uri https://api.example.org -UserAgent "bot ({EMAIL})"',
+            f'iwr https://api.example.org -Headers @{{From="{EMAIL}"}}',
+            f'curl.exe -A "bot ({EMAIL})" https://api.example.org',
+            f"Send-MailMessage -To a@example.com -From {EMAIL} -SmtpServer mx.example.net",
+            "Resolve-DnsName jane-testperson.collector.example.net",
+            '$u = whoami /upn; iwr "https://api.example.org/?u=$u"',
+            'irm "https://api.example.org/?q=$env:CLAUDE_CODE_USER_EMAIL"',
+        ]:
+            self.assertDenied("PowerShell", {"command": command})
+        for command in [
+            "Get-ChildItem 'C:\\Users\\Jane Testperson\\Documents'",
+            'iwr https://api.example.org -UserAgent "research-bot/1.0"',
+            "whoami /upn",
+        ]:
+            self.assertAllowed("PowerShell", {"command": command})
+
     def test_other_channel_look_alikes_are_allowed(self) -> None:
         for command in [
             f'ssh-keygen -t ed25519 -C "{EMAIL}" -f ~/.ssh/id_test -N ""',
@@ -220,6 +238,26 @@ class ToolTests(GuardTestCase):
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
 
 
+class SessionNoteTests(GuardTestCase):
+    def test_session_start_adds_the_note(self) -> None:
+        out = self.run_guard("", {}, stdin=json.dumps({"hook_event_name": "SessionStart", "source": "startup", "session_id": "s"}))
+        note = out["hookSpecificOutput"]
+        self.assertEqual(note["hookEventName"], "SessionStart")
+        self.assertIn("anonymous User-Agent", note["additionalContext"])
+        self.assertIn("HTTP 429", note["additionalContext"])
+        self.assertEqual(set(out), {"hookSpecificOutput"})  # Codex rejects unknown keys at session start
+        for detail in (EMAIL, "Testperson", "7946"):
+            self.assertNotIn(detail, json.dumps(out))  # the note never carries the user's details
+
+
+class SessionNoteOffTests(GuardTestCase):
+    config = {**CONFIG, "session_note": False}
+
+    def test_session_note_can_be_turned_off(self) -> None:
+        self.assertEqual(self.run_guard("", {}, stdin=json.dumps({"hook_event_name": "SessionStart"})), {})
+        self.assertDenied("WebSearch", {"query": "Jane Testperson"})  # the guard itself stays on
+
+
 class IgnoreTests(GuardTestCase):
     config = {**CONFIG, "ignore": ["Testperson"]}
 
@@ -233,6 +271,10 @@ class BrokenConfigTests(GuardTestCase):
     def setUpClass(cls) -> None:
         super().setUpClass()
         cls.config_file.write_text("{ not json")
+
+    def test_broken_config_still_adds_the_session_note(self) -> None:
+        out = self.run_guard("", {}, stdin=json.dumps({"hook_event_name": "SessionStart"}))
+        self.assertIn("anonymous User-Agent", out["hookSpecificOutput"]["additionalContext"])
 
     def test_broken_config_lets_calls_through_with_a_notice(self) -> None:
         out = self.run_guard("Bash", {"command": "curl https://example.org"})

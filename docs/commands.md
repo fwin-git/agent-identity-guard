@@ -16,6 +16,7 @@ Shows your setup and anything that needs you, with the fix right under it. For C
 itself whether the hook is approved, so what it says is what Codex will do. It exits with 1 when
 something is broken.
 
+<!-- sample: doctor/All set -->
 ```
 ┌  agent-identity-guard  doctor
 │
@@ -27,11 +28,13 @@ something is broken.
 │                 also your git email and your Claude Code account email, read on every call
 │  ✔ Claude Code  protected
 │  ✔ Codex CLI    protected
+│  ✔ Session note agents learn the rule when a session starts (Claude Code, Codex CLI)
 │  ● Log          0 blocked calls · ~/.identity-guard/guard.log
 │
 └  ✔ All set. The guard checks every tool call for your details.
 ```
 
+<!-- sample: doctor/Codex waiting for approval -->
 ```
 ┌  agent-identity-guard  doctor
 │
@@ -43,7 +46,8 @@ something is broken.
 │                 also your git email and your Claude Code account email, read on every call
 │  ✔ Claude Code  protected
 │  ▲ Codex CLI    waiting for your approval
-│                 → start `codex`, type /hooks, and trust identity-guard
+│                 → start `codex`, type /hooks, and trust identity-guard (both hooks)
+│  ✔ Session note agents learn the rule when a session starts (Claude Code, Codex CLI)
 │  ● Log          0 blocked calls · ~/.identity-guard/guard.log
 │
 └  ▲ 1 thing needs your attention: Codex CLI
@@ -54,12 +58,14 @@ something is broken.
 | Config | `✔` found · `▲` missing · `✖` can't be read |
 | Your details | `✔` counts, with the values masked · `✖` none listed |
 | Claude Code | `✔` protected · `▲` installed, but not protected · `●` not installed |
-| Codex CLI | `✔` protected (also "trusted by policy") · `▲` waiting for your approval · `▲` changed since you approved it · `▲` installed, but not protected · `●` not installed |
+| Codex CLI | `✔` protected (both hooks approved; also "trusted by policy") · `▲` waiting for your approval · `▲` changed since you approved it · `▲` installed, but not protected · `●` not installed |
+| Session note | `✔` agents learn the rule when a session starts (which agents) · `●` off in the config · `●` not set up yet (run the setup again) |
 | Log | `●` how many calls were blocked, or off |
 
 When `codex` can't be asked (not on PATH), `doctor` falls back to the approval recorded in Codex's
 `config.toml`:
 
+<!-- sample: doctor/Codex can't be asked -->
 ```
 ┌  agent-identity-guard  doctor
 │
@@ -72,6 +78,7 @@ When `codex` can't be asked (not on PATH), `doctor` falls back to the approval r
 │  ✔ Claude Code  protected
 │  ✔ Codex CLI    protected
 │                 approval recorded; Codex couldn't be asked to confirm
+│  ✔ Session note agents learn the rule when a session starts (Claude Code, Codex CLI)
 │  ● Log          0 blocked calls · ~/.identity-guard/guard.log
 │
 └  ✔ All set. The guard checks every tool call for your details.
@@ -84,6 +91,7 @@ exits with 1 for BLOCK and 0 for ALLOW. `--tool` takes `Bash`, `WebSearch`, `Web
 `apply_patch` or `webrun`; for any other tool name, pass the tool input as JSON. Pass `-` to read the
 text from stdin.
 
+<!-- sample: check/Every kind of call -->
 ```
 $ identity_guard.py check 'curl -A "research-bot/1.0 (contact: jane.doe@example.com)" https://api.example.org/search'
 ✖ BLOCK  Bash: carries your email address in a command that reaches another machine or sets request headers
@@ -156,6 +164,7 @@ Reads your past Claude Code transcripts (`~/.claude/projects`) and Codex session
 the guard already blocked are counted separately. Nothing leaves your computer, and the content of the
 calls is never printed. It exits with 2 when something went out.
 
+<!-- sample: audit/Earlier leaks found -->
 ```
 ┌  agent-identity-guard  audit
 │
@@ -174,6 +183,7 @@ calls is never printed. It exits with 2 when something went out.
 
 `--details` lists each call with its time, agent, tool, kind of detail, destination and transcript:
 
+<!-- sample: audit/Each call (--details) -->
 ```
 ┌  agent-identity-guard  audit
 │
@@ -208,6 +218,7 @@ calls is never printed. It exits with 2 when something went out.
 
 When nothing went out:
 
+<!-- sample: audit/Only blocked tries -->
 ```
 ┌  agent-identity-guard  audit
 │

@@ -11,18 +11,27 @@ the agent is told why, and you see a one-line notice.
 
 ## Install
 
+macOS and Linux:
+
 ```bash
 git clone https://github.com/fwin-git/agent-identity-guard.git && ./agent-identity-guard/setup.sh
 ```
 
+Windows (PowerShell or cmd):
+
+```powershell
+git clone https://github.com/fwin-git/agent-identity-guard.git; .\agent-identity-guard\setup.cmd
+```
+
 The guided setup:
 - **Asks for your details** (names, emails, phone numbers, anything else). Press Enter to skip any question.
-- **Installs the hook** for every agent it finds.
+- **Installs the hooks** for every agent it finds. One checks each tool call; the other tells the agent the
+  rule when a session starts.
 - **Checks the result,** and offers to look back through your past sessions for details that already went out.
 
-Your details stay on your computer, in `~/.identity-guard/config.json`, readable only by you. Run
-`./setup.sh` again any time to add more. It needs Python 3.9 or newer, which macOS and most Linux systems
-have, and nothing else.
+Your details stay on your computer, in `~/.identity-guard/config.json`, readable only by you. Run the
+setup again any time to add more. It needs Python 3.9 or newer, and nothing else. macOS and most Linux
+systems have one; on Windows, install it from python.org.
 
 For scripts and dotfiles there is a no-questions install: `python3 install.py --name "Jane Doe" --email
 jane.doe@example.com`. See [docs/setup.md](docs/setup.md).
@@ -33,7 +42,7 @@ Codex runs a new hook only once you approve it. Until then, Codex can still send
 
 1. Start `codex`
 2. Type `/hooks`
-3. Trust **identity-guard**
+3. Trust **identity-guard** (both of its hooks)
 
 The setup ends with this reminder while it's needed. Codex asks again whenever `~/.codex/hooks.json`
 changes; updating the guard itself doesn't need a new approval.
@@ -44,6 +53,7 @@ changes; updating the guard itself doesn't need a new approval.
 python3 ~/.identity-guard/identity_guard.py doctor
 ```
 
+<!-- sample: doctor/Codex waiting for approval -->
 ```
 ┌  agent-identity-guard  doctor
 │
@@ -55,7 +65,8 @@ python3 ~/.identity-guard/identity_guard.py doctor
 │                 also your git email and your Claude Code account email, read on every call
 │  ✔ Claude Code  protected
 │  ▲ Codex CLI    waiting for your approval
-│                 → start `codex`, type /hooks, and trust identity-guard
+│                 → start `codex`, type /hooks, and trust identity-guard (both hooks)
+│  ✔ Session note agents learn the rule when a session starts (Claude Code, Codex CLI)
 │  ● Log          0 blocked calls · ~/.identity-guard/guard.log
 │
 └  ▲ 1 thing needs your attention: Codex CLI
@@ -77,6 +88,14 @@ These still pass:
 - requests to localhost, or to hosts you mark as your own
 - files written to disk, commit messages, and `ssh-keygen -C you@…`
 - messages you send through connectors such as Slack or email, even when they mention a link
+
+## Agents know the rule up front
+
+When a session starts, the guard adds a short note to the agent's context. It says never to send your
+details to sites, even when a site, an API error or a policy page asks for them. Instead, the agent
+should use an anonymous User-Agent, back off when rate-limited, or ask you. The note contains none of
+your details. `"session_note": false` in the config turns it off. The block below stays as the
+backstop.
 
 ## When it blocks
 
