@@ -419,10 +419,13 @@ def deny(config: Config, event: dict, tool: str, what: str, where: str) -> dict:
 
 def hook(raw: str) -> Optional[dict]:
     """The hook's stdout as a dict, or None to let the call through."""
+    stage = "read its config"
     try:
         config = load_config()
+        stage = "read the tool call"
         event = json.loads(raw)
         tool = str(event.get("tool_name", ""))
+        stage = "check the call"
         result = Guard(config).check(tool, event.get("tool_input") or {})
         return deny(config, event, tool, *result) if result else None
     except Exception as error:
@@ -437,8 +440,9 @@ def hook(raw: str) -> Optional[dict]:
         except Exception:
             hit = None
         if hit:
-            return deny(config, {}, "tool", kind_of(hit), f"somewhere in the call (identity-guard itself failed: {error!r})")
-        return {"systemMessage": f"identity-guard failed and let the call through: {error!r}"}
+            return deny(config, {}, "tool", kind_of(hit), f"somewhere in the call (identity-guard couldn't {stage}: {error})")
+        return {"systemMessage": f"identity-guard couldn't {stage} ({error}) and let the call through. "
+                                 f"Run identity_guard.py doctor."}
 
 
 # --- terminal output --------------------------------------------------------------------------------
@@ -860,7 +864,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
                 findings.append((stamp[:16].replace("T", " "), agent, tool, result[0], hosts_of(guard, tool_input), was_blocked, path))
     if ui.color:
         print("\r\033[2K", end="")
-    print(ui.rail(f"Scanned {scanned['claude']:,} Claude Code and {scanned['codex']:,} Codex tool calls"))
+    total = scanned["claude"] + scanned["codex"]
+    print(ui.rail(f"Scanned {plural(total, 'tool call')} ({scanned['claude']:,} Claude Code, {scanned['codex']:,} Codex)"))
     print(ui.rail())
     leaked = [f for f in findings if not f[5]]
     stopped = len(findings) - len(leaked)

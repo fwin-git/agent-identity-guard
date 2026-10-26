@@ -190,11 +190,16 @@ class Prompter:
             print()
             raise Stopped()
 
-    def text(self, title: str, hint: str = "", step: str = "") -> str:
+    def text(self, title: str, hint: str = "", step: str = "", valid: Optional[Callable[[str], Optional[str]]] = None) -> str:
+        """One answer; a refused one is explained and asked again (Enter still skips)."""
         self.heading(title, hint, step)
-        answer = self.read(self.ui.sym["prompt"])
-        self.say()
-        return answer
+        while True:
+            answer = self.read(self.ui.sym["prompt"])
+            problem = valid(answer) if valid and answer else None
+            if not problem:
+                self.say()
+                return answer
+            self.say(f"{self.ui.mark('fail')} {self.ui(problem + '; try again, or press Enter to skip', 'red')}")
 
     def yes(self, title: str, hint: str = "", default: bool = True) -> bool:
         self.heading(f"{title}  {self.ui('(Y/n)' if default else '(y/N)', 'dim')}", hint)
@@ -283,18 +288,14 @@ def guided(args: argparse.Namespace) -> int:
     ask.say()
 
     names: list = []
-    full = ask.text("Your full name", "As people write it, e.g. Jane Doe.", "step 1 of 5")
+    full = ask.text("Your full name", "As people write it, e.g. Jane Doe.", "step 1 of 5", valid_name)
     if full:
-        problem = valid_name(full)
-        if problem:
-            ask.say(f"{ui.mark('fail')} {ui(problem + '; not added', 'red')}")
-        else:
-            names.append(full)
-            words = full.split()
-            surname = words[-1] if len(words) > 1 else ""
-            if len(surname) >= 2 and not new("names", surname) and ask.yes(
-                    f'Also block "{surname}" on its own?', "Say no if it is a common word in your work."):
-                names.append(surname)
+        names.append(full)
+        words = full.split()
+        surname = words[-1] if len(words) > 1 else ""
+        if len(surname) >= 2 and not new("names", surname) and ask.yes(
+                f'Also block "{surname}" on its own?', "Say no if it is a common word in your work."):
+            names.append(surname)
     names += [n for n in ask.many("Other names, nicknames or handles", "One per line, empty line to finish.",
                                   "step 2 of 5", valid_name) if n not in names]
 

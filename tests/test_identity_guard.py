@@ -220,7 +220,8 @@ class BrokenConfigTests(GuardTestCase):
 
     def test_broken_config_lets_calls_through_with_a_notice(self) -> None:
         out = self.run_guard("Bash", {"command": "curl https://example.org"})
-        self.assertIn("identity-guard failed", out["systemMessage"])
+        self.assertIn("couldn't read its config", out["systemMessage"])
+        self.assertIn("let the call through", out["systemMessage"])
         self.assertNotIn("hookSpecificOutput", out)
 
 

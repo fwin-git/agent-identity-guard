@@ -111,7 +111,7 @@ class GuidedSetupTests(unittest.TestCase):
 
     def test_first_run_asks_validates_and_installs(self) -> None:
         done = self.run_setup(
-            "Jane Testperson", "",          # full name, also the surname alone
+            "J", "Jane Testperson", "",     # full name (the first try is refused), also the surname alone
             "jt", "demo", "",               # other names; the login name is refused
             "jane@example.org", "nope", "",  # emails; the second is refused
             "n", "",                        # not the git email; yes the Claude Code account email
@@ -123,6 +123,7 @@ class GuidedSetupTests(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         out = done.stdout
         self.assertIn("can't be used", out)
+        self.assertIn("too short; try again", out)
         self.assertIn("doesn't look like an email address", out)
         self.assertIn("needs at least 6 digits", out)
         self.assertIn("Your git email is jane.work@example.org", out)
@@ -150,7 +151,7 @@ class GuidedSetupTests(unittest.TestCase):
         done = self.run_setup("", "", "second@example.org", "", "", "", "", "", "", "", script="install.py")
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertIn("Already in your config", done.stdout)
-        self.assertIn("Scanned 1 Claude Code and 0 Codex tool calls", done.stdout)  # Enter accepts the audit
+        self.assertIn("Scanned 1 tool call (1 Claude Code, 0 Codex)", done.stdout)  # Enter accepts the audit
         self.assertEqual(self.config()["markers"]["emails"], ["jane@example.org", "second@example.org"])
         self.assertEqual(self.config()["markers"]["names"], ["Jane Testperson", "Testperson"])
         self.assertFalse(self.config()["auto_markers"]["git_email"])  # the earlier answer is the new default
