@@ -1,0 +1,6 @@
+# Personal: your markers and the block log
+config.json
+guard.log
+*.bak
+__pycache__/
+.DS_Store

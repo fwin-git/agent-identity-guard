@@ -1,0 +1,24 @@
+{
+  "_help": "Copy to config.json next to identity_guard.py (install.py does this) and list what identifies you. Keys starting with _ are comments. See README.md.",
+  "markers": {
+    "_emails": "Matched as written, ignoring case; also URL-encoded (%40).",
+    "emails": ["jane.doe@example.com", "jdoe@work.example"],
+    "_names": "Whole words, ignoring case, with any of space . _ - + between the words, so jane.doe and Jane_Doe match. Add your surname alone to catch it anywhere; avoid a first name that is also an everyday word.",
+    "names": ["Jane Doe", "Doe"],
+    "_phones": "Digits with any of space ( ) . - / between them. A number written with + or 00 also matches with either prefix or none; add the national form (020 ...) separately.",
+    "phones": ["+44 20 7946 0958"],
+    "_other": "Anything else, matched as written ignoring case: a street address, a handle, a customer number.",
+    "other": ["42 Example Street", "janedoe1990"]
+  },
+  "auto_markers": {
+    "_help": "Also treat these as your email, read on every call.",
+    "claude_code_account_email": true,
+    "git_email": true
+  },
+  "_ignore": "Values never treated as identity, e.g. a handle that is in every path. Your login name is always ignored.",
+  "ignore": [],
+  "_local_hosts": "Extra host patterns (fnmatch globs) that count as your own machines, like localhost does: requests there may carry your details.",
+  "local_hosts": [],
+  "_log_file": "Where blocked calls are logged (time, agent, session, tool, kind, folder; never the content). Relative to this file; \"\" turns logging off.",
+  "log_file": "guard.log"
+}
