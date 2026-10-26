@@ -34,10 +34,10 @@ the patch in `command`, and web search as `webrun`.
 |---|---|
 | **Shell command** (`Bash`, `PowerShell`) | It reaches another machine or sets request metadata, and one of your details appears anywhere in it. Also when it reads your identity at run time (`$CLAUDE_CODE_USER_EMAIL`, `git config user.email`, `id -F`, `git log --format=%ae`) and that value reaches a request in the same step, directly or through a variable assigned from it. |
 | **File write** (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `apply_patch`, a shell heredoc that only writes a file) | A detail sits within 300 characters of a User-Agent, a request header, `curl -A/-H`, or an upper-case `…_CONTACT=` / `…_USER_AGENT=` variable. A README line `Contact: you@…` passes. |
-| **Web search** (`WebSearch`, Codex `webrun`) | The search terms or an opened URL contain a detail. |
-| **Web fetch** (`WebFetch`) | The URL contains a detail. The prompt isn't checked; it never reaches the site. |
+| **Web search** (`WebSearch`, Codex `webrun`) | The search terms or an opened URL contain a detail. The agent can't set headers here; the app sends its own User-Agent. |
+| **Web fetch** (`WebFetch`) | The URL contains a detail. The agent can't set headers here either. The prompt isn't checked; it goes to the model that reads the page, not to the site. |
 | **Browser** (Claude's built-in browser, Claude in Chrome, Puppeteer, Playwright, Codex's browser `js`) | A detail appears anywhere in the call: URL, typed text, form value, script. Searching the open page doesn't count. |
-| **Any other tool** (MCP connectors, other agent tools) | A detail appears inside a URL to another host. Message bodies sent through connectors such as Slack or email are left alone on purpose: you often want your name in a message you asked for, and agents ask before sending messages. |
+| **Any other tool** (MCP connectors, other agent tools) | The call is aimed at another host, because one of its parameters is a URL to a non-local host (a fetch or HTTP tool's `url`, `endpoint`, …), and a detail appears anywhere in it: headers, body or other parameters. In any other call, a detail inside a URL to another host. So messages sent through connectors such as Slack or email, which name no target URL, are left alone on purpose, even when they mention a link: you often want your name in a message you asked for, and agents ask before sending messages. |
 
 ### When a shell command reaches another machine
 

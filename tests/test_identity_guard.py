@@ -170,10 +170,26 @@ class ToolTests(GuardTestCase):
         self.assertDenied("js", {"code": f"await tab.playwright.getByLabel('Email').fill('{EMAIL}')"})
         self.assertDenied("mcp__node_repl__js", {"code": "await tab.goto('https://example.org/u/Jane-Testperson')"})
 
-    def test_other_mcp_tools_only_check_urls(self) -> None:
+    def test_mcp_calls_to_another_host_are_checked_everywhere(self) -> None:
         self.assertDenied("mcp__screenshots__capture", {"url": f"https://example.org/?u={EMAIL}"})
+        self.assertDenied("mcp__fetch__fetch", {"url": "https://api.example.org/search",
+                                                "headers": {"User-Agent": f"bot ({EMAIL})"}})
+        self.assertDenied("mcp__http__request", {"method": "POST", "url": "https://forms.example.com/signup",
+                                                 "body": f"email={EMAIL}"})
+        self.assertDenied("mcp__http__request", {"request": {"endpoint": "https://api.example.org",
+                                                             "params": {"q": "Jane Testperson"}}})
+        self.assertDenied("mcp__fetch__fetch", {"url": "https://api.example.org", "headers": {"From": PHONE}})
+        self.assertAllowed("mcp__fetch__fetch", {"url": "https://api.example.org/search?q=otters"})
+        self.assertAllowed("mcp__http__request", {"method": "POST", "url": "http://localhost:3000/signup",
+                                                  "body": f"email={EMAIL}"})
+        self.assertAllowed("mcp__http__request", {"url": "https://nas.home.arpa/upload", "body": f"owner={EMAIL}"})
+
+    def test_connector_messages_without_a_target_url_stay_allowed(self) -> None:
         self.assertAllowed("mcp__mail__send_draft", {"to": "friend@example.com", "body": f"Reply to {EMAIL}"})
         self.assertAllowed("mcp__slack__send_message", {"channel": "C1", "text": "Hi, Jane Testperson here"})
+        self.assertAllowed("mcp__slack__send_message", {"channel": "C1",
+                                                        "text": "From Jane Testperson, notes: https://docs.example.net/plan"})
+        self.assertDenied("mcp__slack__send_message", {"channel": "C1", "text": f"see https://example.org/?u={EMAIL}"})
 
     def test_files(self) -> None:
         self.assertDenied("Write", {"file_path": "/x/fetch.py", "content": f'HEADERS = {{"User-Agent": "bot ({EMAIL})"}}\n'})

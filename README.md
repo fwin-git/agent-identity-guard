@@ -69,14 +69,14 @@ python3 ~/.identity-guard/identity_guard.py doctor
 |---|---|
 | **Shell commands**, in both agents | appears in a command that reaches another machine: http(s) URLs, curl and HTTP libraries, `gh`, ssh/scp/rsync, nc/socat, mail, DNS lookups, raw sockets. It's also blocked when your identity is read at run time (`git config user.email`, `$CLAUDE_CODE_USER_EMAIL`) and used in a request. |
 | **File writes** (`Write`, `Edit`, Codex `apply_patch`) | sits next to a User-Agent, a request header or a `…_CONTACT=` variable |
-| **Web search and web fetch** | is in the search terms or the URL |
+| **Web search and web fetch** | is in the search terms or the URL. These tools take nothing else from the agent; Claude Code and Codex send their own User-Agent and headers. |
 | **Browser automation** | is in a URL, typed text, a form value or a script |
-| **Other tools** (MCP connectors) | is inside a URL to another host |
+| **MCP tools** | is anywhere in a call aimed at another host by URL, such as a fetch or HTTP tool (headers, body, parameters). In other calls, only inside a URL. |
 
 These still pass:
 - requests to localhost, or to hosts you mark as your own
 - files written to disk, commit messages, and `ssh-keygen -C you@…`
-- messages you send through connectors such as Slack or email
+- messages you send through connectors such as Slack or email, even when they mention a link
 
 ## When it blocks
 

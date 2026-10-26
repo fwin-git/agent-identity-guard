@@ -92,6 +92,7 @@ FILE_HEREDOC = re.compile(
     re.S,
 )
 URL = re.compile(r"https?://[^\s\"'<>`)\]}]+", re.I)
+TARGET_URL = re.compile(r"\s*https?://\S+\s*$", re.I)  # a parameter that is nothing but a URL: where a tool sends the call
 LOCAL_HOST = re.compile(
     r"^(localhost|127\.\d+\.\d+\.\d+|\[?::1\]?|0\.0\.0\.0|[^.]+|.+\.(localhost|local|test|internal))$", re.I
 )
@@ -366,8 +367,13 @@ class Guard:
             hit = self.find(joined)
             return (kind_of(hit), "in a browser action (URL, typed text, form value or script)") if hit else None
 
-        # Any other tool (MCP connectors, other agent tools): only identity inside an outside URL counts.
-        # Message bodies sent through connectors are left alone on purpose.
+        # Any other tool (MCP connectors, other agent tools). A call aimed at another host (a parameter that
+        # is itself a URL, like a fetch or HTTP tool's "url") counts everywhere: headers, body, parameters.
+        # Otherwise only identity inside a URL counts, so connector messages (Slack, email) stay possible.
+        if any(self.outside_urls(value) for value in texts if TARGET_URL.match(value)):
+            hit = self.find(joined)
+            if hit:
+                return kind_of(hit), "in a request to another host (URL, headers or body)"
         for url in self.outside_urls(joined):
             hit = self.find(url)
             if hit:

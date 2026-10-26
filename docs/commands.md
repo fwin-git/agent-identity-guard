@@ -139,6 +139,12 @@ $ identity_guard.py check --tool webrun 'Jane Doe linkedin'
 $ identity_guard.py check --tool mcp__Claude_Browser__computer '{"action": "type", "text": "jane.doe@example.com"}'
 ✖ BLOCK  mcp__Claude_Browser__computer: carries your email address in a browser action (URL, typed text, form value or script)
 
+$ identity_guard.py check --tool mcp__fetch__fetch '{"url": "https://api.example.org/search", "headers": {"User-Agent": "bot (jane.doe@example.com)"}}'
+✖ BLOCK  mcp__fetch__fetch: carries your email address in a request to another host (URL, headers or body)
+
+$ identity_guard.py check --tool mcp__http__request '{"method": "POST", "url": "https://forms.example.com/signup", "body": "email=jane.doe@example.com"}'
+✖ BLOCK  mcp__http__request: carries your email address in a request to another host (URL, headers or body)
+
 $ identity_guard.py check --tool mcp__slack__send_message '{"channel": "C1", "text": "Hi, Jane Doe here"}'
 ✔ ALLOW  mcp__slack__send_message
 ```
