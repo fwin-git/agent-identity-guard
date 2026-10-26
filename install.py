@@ -203,6 +203,30 @@ def ask_many(prompt: str, valid: Callable[[str], Optional[str]]) -> list:
             values.append(value)
 
 
+def paint(text: str, *codes: str) -> str:
+    """ANSI styling (1 bold, 33 yellow, 36 cyan) on a terminal; plain text in pipes or with NO_COLOR."""
+    if not codes or not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
+        return text
+    return f"\033[{';'.join(codes)}m{text}\033[0m"
+
+
+def boxed(title: str, text: str, width: int = 64) -> str:
+    """A framed panel that stands out from the command output around it."""
+    import textwrap
+
+    lines = [""] + textwrap.wrap(text, width - 4) + [""]
+    top = f"╭─ {title} " + "─" * (width - len(title) - 3) + "╮"
+    body = [f"│  {line:<{width - 4}}  │" for line in lines]
+    bottom = "╰" + "─" * width + "╯"
+    return "\n".join(paint(row, "1", "33") for row in [top, *body, bottom])
+
+
+def past_sessions() -> int:
+    """How many Claude Code and Codex transcripts this computer has (what audit would read)."""
+    roots = [claude_home() / "projects", codex_home() / "sessions", codex_home() / "archived_sessions"]
+    return sum(1 for root in roots if root.exists() for _ in root.rglob("*.jsonl"))
+
+
 def git_email() -> str:
     try:
         return subprocess.run(["git", "config", "--global", "user.email"], capture_output=True, text=True, timeout=5).stdout.strip()
@@ -237,7 +261,7 @@ def guided(args: argparse.Namespace) -> int:
     def valid_other(value: str) -> Optional[str]:
         return "needs at least 4 characters" if len(value) < 4 else new("other", value)
 
-    print("agent-identity-guard: guided setup\n")
+    print(paint("agent-identity-guard: guided setup", "1") + "\n")
     print("This stops Claude Code and Codex from sending your name, email, phone number or other details")
     print(f"to other machines. What you enter stays on this computer, in {prefix / 'config.json'},")
     print("readable only by you. Press Enter to skip a question.\n")
@@ -285,7 +309,7 @@ def guided(args: argparse.Namespace) -> int:
 
     additions = {kind: values for kind, values in
                  (("names", names), ("emails", emails), ("phones", phones), ("other", other)) if values}
-    print("\nSummary")
+    print(paint("\nSummary", "1"))
     for kind in ("names", "emails", "phones", "other"):
         values = have[kind] + additions.get(kind, [])
         extra = []
@@ -308,19 +332,27 @@ def guided(args: argparse.Namespace) -> int:
     print("\n".join(install(prefix, agents, python, additions, False, auto)))
     script = prefix / "identity_guard.py"
     run = f"{shlex.quote(python)} {shlex.quote(str(script))}"
-    print("\nChecking the setup" + (" (asks Codex for the hook's status)" if "codex" in agents else "") + "...\n", flush=True)
+    print(paint("\nChecking the setup", "1") + (" (asks Codex for the hook's status)" if "codex" in agents else "") + "...\n", flush=True)
     subprocess.run([python, str(script), "doctor"])
 
-    print("\nNext")
+    sessions = past_sessions()
+    if sessions:
+        print("\n" + boxed("Check your past sessions", (
+            f"Agents may have sent your details before this guard existed. The audit reads your {sessions:,} "
+            f"past Claude Code and Codex session{'' if sessions == 1 else 's'} on this computer (nothing leaves it) and lists which calls "
+            "carried your details and where they went. It can take a minute or two.")))
+        if ask_yes(paint("  Run the audit now?", "1")):
+            print(flush=True)
+            subprocess.run([python, str(script), "audit"])
+        else:
+            print(f"  Run it any time: {run} audit")
+
+    print(paint("\nNext", "1"))
     if "codex" in agents:
-        print("  - Codex runs a new hook only once you approve it: start `codex`, type /hooks, trust identity-guard.")
+        print("  " + paint("- Codex runs a new hook only once you approve it: start `codex`, type /hooks, trust identity-guard.", "1", "36"))
     example = (emails or have["emails"] or ["jane.doe@example.com"])[0]
     print(f"  - Try it: {run} check 'curl -A \"bot ({example})\" https://example.org'")
     print(f"  - Change your details any time in {prefix / 'config.json'}, or run ./setup.sh again.")
-    if ask_yes("\nScan your past Claude Code and Codex sessions for details that already went out? "
-               "It reads only local transcripts and can take a minute.", False):
-        print(flush=True)
-        subprocess.run([python, str(script), "audit"])
     return 0
 
 

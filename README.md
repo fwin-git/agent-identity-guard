@@ -27,7 +27,7 @@ agent is told why and what to do instead, and you see a one-line notice.
 One command clones the repo and starts the guided setup:
 
 ```bash
-gh repo clone fwin-git/agent-identity-guard && ./agent-identity-guard/setup.sh
+git clone https://github.com/fwin-git/agent-identity-guard.git && ./agent-identity-guard/setup.sh
 ```
 
 The setup asks for your details, shows a summary, installs the hook for every agent it finds (Claude
@@ -78,15 +78,28 @@ log          ~/.identity-guard/guard.log (0 blocked call(s))
 Claude Code  registered (matcher Bash|PowerShell|WebFetch|WebSearch|Write|Edit|MultiEdit|NotebookEdit|mcp__.*)
 Codex CLI    registered, NOT trusted yet: run codex, type /hooks, trust identity-guard
 
+╭─ Check your past sessions ─────────────────────────────────────╮
+│                                                                │
+│  Agents may have sent your details before this guard existed.  │
+│  The audit reads your 3 past Claude Code and Codex sessions    │
+│  on this computer (nothing leaves it) and lists which calls    │
+│  carried your details and where they went. It can take a       │
+│  minute or two.                                                │
+│                                                                │
+╰────────────────────────────────────────────────────────────────╯
+  Run the audit now? [Y/n]
+
+Scanned 3 Claude Code and 0 Codex tool calls.
+No call carried your identity where identity-guard would block it.
+
 Next
   - Codex runs a new hook only once you approve it: start `codex`, type /hooks, trust identity-guard.
   - Try it: /usr/bin/python3 ~/.identity-guard/identity_guard.py check 'curl -A "bot (jane.doe@example.com)" https://example.org'
   - Change your details any time in ~/.identity-guard/config.json, or run ./setup.sh again.
-
-Scan your past Claude Code and Codex sessions for details that already went out? It reads only local transcripts and can take a minute. [y/N]
 ```
 
-The setup refuses entries that can't work: an email without `@`, a phone number with fewer than six
+In a terminal the audit offer is a highlighted panel, and Enter starts it. The setup refuses entries
+that can't work: an email without `@`, a phone number with fewer than six
 digits, or your login name, which appears in every file path. Run `./setup.sh` again any time to add
 details; it keeps what you entered before. To remove an entry, edit `config.json`.
 

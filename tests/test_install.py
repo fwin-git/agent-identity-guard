@@ -88,6 +88,10 @@ class GuidedSetupTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name)
         (self.home / ".claude").mkdir()
+        session = self.home / ".claude" / "projects" / "p" / "s.jsonl"  # one past session, so the audit is offered
+        session.parent.mkdir(parents=True)
+        session.write_text(json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}]}}) + "\n")
         gitconfig = self.home / "gitconfig"
         gitconfig.write_text("[user]\n\temail = jane.work@example.org\n")
         self.env = {**os.environ, "HOME": str(self.home), "USER": "demo", "GIT_CONFIG_GLOBAL": str(gitconfig)}
@@ -133,13 +137,19 @@ class GuidedSetupTests(unittest.TestCase):
         settings = json.loads((self.home / ".claude" / "settings.json").read_text())
         self.assertIn("identity_guard.py", settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"])
         self.assertLess(out.index("Summary"), out.index("copied identity_guard.py"))
-        self.assertLess(out.index("copied identity_guard.py"), out.index("Claude Code  registered"))  # doctor runs last
+        self.assertLess(out.index("copied identity_guard.py"), out.index("Claude Code  registered"))  # then doctor
+        self.assertLess(out.index("Claude Code  registered"), out.index("Check your past sessions"))  # then the audit offer
+        self.assertIn("reads your 1 past Claude Code and Codex session on", out)
+        self.assertIn("Run it any time:", out)  # declined: says how to run it later
+        self.assertLess(out.index("Check your past sessions"), out.index("\nNext"))  # next steps come last
+        self.assertNotIn("\033[", out)  # no colors outside a terminal
 
     def test_second_run_adds_on_top(self) -> None:
         self.run_setup("Jane Testperson", "", "", "jane@example.org", "", "n", "", "", "", "", "n")
-        done = self.run_setup("", "", "second@example.org", "", "", "", "", "", "", "n", script="install.py")
+        done = self.run_setup("", "", "second@example.org", "", "", "", "", "", "", "", script="install.py")
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertIn("Already in your config", done.stdout)
+        self.assertIn("Scanned 1 Claude Code and 0 Codex tool calls.", done.stdout)  # Enter accepts the audit
         self.assertEqual(self.config()["markers"]["emails"], ["jane@example.org", "second@example.org"])
         self.assertEqual(self.config()["markers"]["names"], ["Jane Testperson", "Testperson"])
         self.assertFalse(self.config()["auto_markers"]["git_email"])  # the earlier answer is the new default
