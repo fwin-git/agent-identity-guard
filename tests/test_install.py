@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path, PureWindowsPath
 
@@ -31,7 +32,7 @@ for line in sys.stdin:
 
 def home_env(home: Path, **extra: str) -> dict:
     """An environment whose home folder is `home` on every platform (HOME on macOS/Linux, USERPROFILE on Windows)."""
-    env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home), **extra}
+    env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home), "PYTHONIOENCODING": "utf-8", **extra}
     for name in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "CLAUDE_CODE_USER_EMAIL", "IDENTITY_GUARD_CONFIG"):
         env.pop(name, None)
     return env
@@ -62,7 +63,7 @@ class InstallTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def install(self, *args: str) -> str:
-        done = subprocess.run([sys.executable, str(INSTALL), *args], capture_output=True, text=True, env=self.env, timeout=60)
+        done = subprocess.run([sys.executable, str(INSTALL), *args], capture_output=True, text=True, encoding="utf-8", errors="replace", env=self.env, timeout=60)
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         return done.stdout
 
@@ -86,7 +87,8 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(config["markers"]["names"], ["Jane Testperson"])
         self.assertEqual(config["markers"]["emails"], ["jane@example.org"])
         self.assertEqual(config["markers"]["phones"], [])  # the example's sample values are not copied
-        self.assertEqual(oct((self.home / ".identity-guard" / "config.json").stat().st_mode & 0o777), "0o600")
+        if os.name != "nt":  # Windows has no permission bits; the user folder's own permissions keep it private
+            self.assertEqual(oct((self.home / ".identity-guard" / "config.json").stat().st_mode & 0o777), "0o600")
         again = self.install("--name", "Jane Testperson")
         self.assertIn("unchanged", again)
         self.assertIn("kept", again)
@@ -135,7 +137,7 @@ class GuidedSetupTests(unittest.TestCase):
             command = ["cmd", "/c", str(REPO / "setup.cmd")] if os.name == "nt" else [str(REPO / "setup.sh")]
         else:
             command = [sys.executable, str(INSTALL), "--guided"]
-        return subprocess.run(command, input="\n".join(answers) + "\n", capture_output=True, text=True, env=self.env, timeout=120)
+        return subprocess.run(command, input="\n".join(answers) + "\n", capture_output=True, text=True, encoding="utf-8", errors="replace", env=self.env, timeout=120)
 
     def config(self) -> dict:
         return json.loads(self.config_file.read_text())
@@ -165,7 +167,8 @@ class GuidedSetupTests(unittest.TestCase):
         self.assertEqual(markers["other"], [])
         self.assertFalse(self.config()["auto_markers"]["git_email"])
         self.assertTrue(self.config()["auto_markers"]["claude_code_account_email"])
-        self.assertEqual(oct(self.config_file.stat().st_mode & 0o777), "0o600")
+        if os.name != "nt":
+            self.assertEqual(oct(self.config_file.stat().st_mode & 0o777), "0o600")
         settings = json.loads((self.home / ".claude" / "settings.json").read_text())
         self.assertIn("identity_guard.py", settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"])
         self.assertLess(out.index("Summary"), out.index("Installed"))
@@ -247,14 +250,19 @@ class CodexTrustTests(unittest.TestCase):
             wrapper.chmod(0o755)
         self.path = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
         subprocess.run([sys.executable, str(INSTALL), "--agents", "codex", "--email", "jane@example.org"],
-                       env=home_env(self.home, PATH=self.path), capture_output=True, text=True, check=True, timeout=60)
+                       env=home_env(self.home, PATH=self.path), capture_output=True, text=True, encoding="utf-8", errors="replace", check=True, timeout=60)
 
     def tearDown(self) -> None:
-        self.tmp.cleanup()
+        for _ in range(20):  # Windows can take a moment to release a just-ended process's files
+            try:
+                self.tmp.cleanup()
+                return
+            except PermissionError:
+                time.sleep(0.25)
 
     def doctor(self, trust: str) -> str:
         guard = self.home / ".identity-guard" / "identity_guard.py"
-        done = subprocess.run([sys.executable, str(guard), "doctor"], capture_output=True, text=True, timeout=60,
+        done = subprocess.run([sys.executable, str(guard), "doctor"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
                               env=home_env(self.home, PATH=self.path, FAKE_CODEX_TRUST=trust))
         return done.stdout
 

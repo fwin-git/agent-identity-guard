@@ -701,8 +701,22 @@ def codex_trust(timeout: float = 20.0) -> dict:
     except OSError:
         pass
     finally:
-        server.terminate()
+        stop(server)
     return statuses
+
+
+def stop(process: subprocess.Popen) -> None:
+    """End `codex app-server`: closing its input lets it exit by itself. On Windows `codex` is an npm .cmd
+    wrapper, and terminate() would only end the wrapper, so a server that hangs on gets its whole tree ended."""
+    try:
+        if process.stdin:
+            process.stdin.close()
+        process.wait(timeout=2)
+    except (OSError, subprocess.TimeoutExpired):
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True)
+        else:
+            process.terminate()
 
 
 KIND_WORDS = {"emails": "email", "names": "name", "phones": "phone number", "other": "other detail"}

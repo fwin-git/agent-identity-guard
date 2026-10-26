@@ -37,6 +37,7 @@ class GuardTestCase(unittest.TestCase):
             **os.environ,
             "IDENTITY_GUARD_CONFIG": str(cls.config_file),
             "USER": "tester",
+            "PYTHONIOENCODING": "utf-8",  # the same output on every platform (Windows pipes default to cp1252)
             "CLAUDE_CONFIG_DIR": str(Path(cls.tmp.name) / "claude"),  # keep doctor/audit off the real setup
             "CODEX_HOME": str(Path(cls.tmp.name) / "codex"),
         }
@@ -47,12 +48,12 @@ class GuardTestCase(unittest.TestCase):
 
     def run_guard(self, tool: str, tool_input: dict, stdin: str | None = None) -> dict:
         payload = stdin if stdin is not None else json.dumps({"tool_name": tool, "tool_input": tool_input, "session_id": "test"})
-        done = subprocess.run([sys.executable, str(GUARD)], input=payload, capture_output=True, text=True, env=self.env, timeout=20)
+        done = subprocess.run([sys.executable, str(GUARD)], input=payload, capture_output=True, text=True, encoding="utf-8", errors="replace", env=self.env, timeout=20)
         self.assertEqual(done.returncode, 0, done.stderr)
         return json.loads(done.stdout) if done.stdout.strip() else {}
 
     def cli(self, *args: str) -> subprocess.CompletedProcess:
-        return subprocess.run([sys.executable, str(GUARD), *args], capture_output=True, text=True, env=self.env, timeout=60)
+        return subprocess.run([sys.executable, str(GUARD), *args], capture_output=True, text=True, encoding="utf-8", errors="replace", env=self.env, timeout=60)
 
     def assertDenied(self, tool: str, tool_input: dict) -> dict:
         out = self.run_guard(tool, tool_input)
@@ -295,10 +296,10 @@ class CliTests(GuardTestCase):
     def test_plain_ascii_terminal_gets_ascii_symbols(self) -> None:
         env = {**self.env, "PYTHONIOENCODING": "ascii"}
         blocked = subprocess.run([sys.executable, str(GUARD), "check", 'curl -A "Jane Testperson" https://example.org'],
-                                 capture_output=True, text=True, env=env, timeout=60)
+                                 capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=60)
         self.assertEqual(blocked.returncode, 1, blocked.stderr)
         self.assertTrue(blocked.stdout.startswith("x BLOCK  Bash"), blocked.stdout)
-        doctor = subprocess.run([sys.executable, str(GUARD), "doctor"], capture_output=True, text=True, env=env, timeout=60)
+        doctor = subprocess.run([sys.executable, str(GUARD), "doctor"], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=60)
         self.assertEqual(doctor.returncode, 0, doctor.stderr)
         self.assertIn("+ Your details", doctor.stdout)
 

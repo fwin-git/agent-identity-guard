@@ -3,7 +3,7 @@
 [README](../README.md) · [Setup](setup.md) · **Configuration** · [How it works](how-it-works.md) · [Commands](commands.md) · [Limits](limits.md) · [Development](development.md)
 
 Your details live in `~/.identity-guard/config.json`, or in the file named by `IDENTITY_GUARD_CONFIG`.
-The setup creates it readable only by you. Keys that start with `_` are comments. Changes apply on the
+The setup creates it readable only by you (on Windows, your user folder's permissions keep it private). Keys that start with `_` are comments. Changes apply on the
 next tool call; nothing needs restarting.
 
 ```json
